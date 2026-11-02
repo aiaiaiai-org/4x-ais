@@ -1,0 +1,42 @@
+# © 2026 aiaiaiai · aiaiaiai.org
+# SPDX-License-Identifier: Apache-2.0
+
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: 4x-ais-ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  agent-rules:
+    name: Agent rules
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate PR commit attribution
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: ruby scripts/check-commit-attribution.rb
+
+      - name: Test commit attribution checker
+        run: ruby scripts/test-commit-attribution.rb
+
+      - name: Check shared files against the canonical source
+        run: ruby scripts/check-shared-sync.rb
+
+      - name: Test shared sync checker
+        run: ruby scripts/test-shared-sync.rb
