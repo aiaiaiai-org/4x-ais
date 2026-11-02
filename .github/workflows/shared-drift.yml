@@ -1,0 +1,21 @@
+# © 2026 aiaiaiai · aiaiaiai.org
+# SPDX-License-Identifier: Apache-2.0
+
+name: Shared agent rules drift
+
+on:
+  schedule:
+    - cron: '17 8 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  upstream-drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare shared files with upstream default branch
+        run: ruby scripts/check-shared-sync.rb --latest
