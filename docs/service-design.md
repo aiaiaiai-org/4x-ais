@@ -1,5 +1,5 @@
 <!-- © 2026 aiaiaiai · aiaiaiai.org -->
-<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 
 # aiaiaiai AIS: the auth identity service
 
@@ -7,6 +7,46 @@ Status: design, owner review pending. No code yet.
 Host: `auth.aiaiaiai.org` (edge-prod-2, DNS only).
 Parent: [ECO-0001](https://github.com/aiaiaiai-org/.github/blob/main/ecosystem/identity/DESIGN.md),
 and `nilx-one/web` `docs/unified-auth.md` and `docs/identity-boundary.md`.
+
+## What exists today
+
+Facts as of 2026-11-02. Nothing below is deployed.
+
+**`nilx-one/web`, `services/identity`** (the identity service that also runs
+0x1 today):
+
+- Native sign-in and registration: `pub_dress` + password, Argon2id, sessions,
+  remembered Bond hint, rate limits (`api.rs`).
+- Provider sign-in: Telegram (OIDC, PKCE), Discord, GitHub (identity only).
+  Provider bindings and refusals (`browser_web_auth.rs`, Core's
+  `provider_link`).
+- The aiaiaiai issuer (`issuer.rs`, PR #593, merged): discovery, JWKS, a
+  server-rendered `/authorize` (sign in or create), `/token`, EdDSA `id_token`s,
+  pairwise `sub` per client. Contract 17.
+- The 0x1 site's routes `/api/v1/auth/aiaiaiai/{config,start,callback}`. They
+  only forward to Core's `SignInFlow`.
+- Off until configured. Environment variables are not yet in
+  `prepare-runtime-env.sh`.
+
+**`nilx-one/core`**:
+
+- `aiaiaiai_sign_in` (PRs #91, #92, merged): the 0x1 client of the issuer:
+  `SignInFlow` (start, finish), `complete` (token exchange, JWKS, `id_token`
+  verification, EdDSA only), and `resolve_aiaiaiai_account` with the
+  `aiaiaiai_accounts` table (migration 0042).
+- `client_pairwise_subject`: the per-client digest of the private subject.
+
+**`aiaiaiai-org/infra`**: the draft route for `auth.aiaiaiai.org` (PR #90) is
+on edge-prod-1. It is out of date: the host is on edge-prod-2 (DNS only), and
+the placement is undecided.
+
+**`nilx-one/web` docs**: `unified-auth.md` (contract), `identity-boundary.md`
+(the split: identity keeps people, 0x1 keeps the game, the seeds wallet moves
+to 0x1, one admin role `gm`, a full wipe of existing users announced through
+the Telegram bot).
+
+**Not yet built**: the service itself in this repository, the second skin,
+the one-time prefix change, the event outbox, the wipe.
 
 ## What it owns
 
@@ -106,8 +146,8 @@ bot first (`docs/identity-boundary.md` in `nilx-one/web`).
 
 - Branches: `feat/*`, `fix/*`, `docs/*`. No `claude/*` names.
 - Gates: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`.
-- Every new file carries the copyright header and `SPDX-License-Identifier:
-  MPL-2.0`.
+- Licensed under Apache-2.0 (`LICENSE`, `NOTICE`), as `4x-errors`. Every new
+  file carries the copyright header and `SPDX-License-Identifier: Apache-2.0`.
 
 ## Open questions
 
