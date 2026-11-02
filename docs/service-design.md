@@ -52,8 +52,13 @@ underneath.
   `freezbylove@gmail.com` → `0xf` + `reezbylove`. That is a suggestion the
   person confirms, never an automatic choice (ECO-0001 §2).
 - **One-time change:** on the first entry into a `cell` product, a person whose
-  prefix was assigned may replace it, **once**. The flag lives on the identity,
-  not on a product, so it cannot be used again elsewhere.
+  prefix was assigned sees the offer, **once**:
+
+  > Ми підібрали вам `{prefix}`, виберіть інший, якщо цей не ок.
+
+  The flag lives on the identity, not on a product, so it cannot be used again
+  elsewhere. The English copy is written with the same meaning when the page
+  is localized.
   - Assumption to confirm: a person who already chose a prefix in a `cell`
     product gets no second change.
   - A change keeps the identity and its `sub`; only the public address moves.
