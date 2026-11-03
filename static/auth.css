@@ -4,8 +4,8 @@
 /*
  * Sign-in and registration page for aiaiaiai AIS.
  * Base: packages/auth-view in nilx-one/web (components, focus, touch targets).
- * Surfaces, text and type: aiaiaiai.org (white surface, #efefed page tone,
- * Geist). The single accent is #185adb.
+ * Surfaces, text and type: aiaiaiai.org (white page and panel, Geist).
+ * The single accent is #185adb.
  * The page is served with a strict CSP: fonts and styles come from this origin.
  */
 
@@ -20,7 +20,7 @@
 
 :root {
   color-scheme: light dark;
-  --auth-page: #efefed;
+  --auth-page: #fff;
   --auth-surface: #fff;
   --auth-ink: #535653;
   --auth-muted: #6f736f;
