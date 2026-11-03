@@ -1,0 +1,226 @@
+/* © 2026 aiaiaiai · aiaiaiai.org */
+/* SPDX-License-Identifier: Apache-2.0 */
+
+/*
+ * Sign-in and registration page for aiaiaiai AIS.
+ * Base: packages/auth-view in nilx-one/web (components, focus, touch targets).
+ * Surfaces, text and type: aiaiaiai.org (white surface, #efefed page tone,
+ * Geist). The single accent is #185adb.
+ * The page is served with a strict CSP: fonts and styles come from this origin.
+ */
+
+/* Geist is bundled by the service and served from /static; font-src 'self'. */
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/static/fonts/geist-400.woff2') format('woff2');
+}
+
+:root {
+  color-scheme: light dark;
+  --auth-page: #efefed;
+  --auth-surface: #fff;
+  --auth-ink: #535653;
+  --auth-muted: #6f736f;
+  --auth-line: #d7dce4;
+  --auth-field-line: #8a97aa;
+  --auth-accent: #185adb;
+  --auth-accent-ink: #fff;
+  --auth-error: #a31b3a;
+  --auth-focus: #565f73;
+  --auth-font: 'Geist', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+/* Dark: the site's warm neutrals, inverted. The accent is lifted so it keeps
+   contrast on a dark surface; its text turns dark. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --auth-page: #121311;
+    --auth-surface: #1b1c1a;
+    --auth-ink: #e4e5e1;
+    --auth-muted: #a5a9a2;
+    --auth-line: #3a3d38;
+    --auth-field-line: #6e736c;
+    --auth-accent: #7ea2ff;
+    --auth-accent-ink: #0f1830;
+    --auth-error: #ff9bb0;
+    --auth-focus: #aab6d8;
+  }
+}
+:root[data-theme='dark'] {
+  --auth-page: #121311;
+  --auth-surface: #1b1c1a;
+  --auth-ink: #e4e5e1;
+  --auth-muted: #a5a9a2;
+  --auth-line: #3a3d38;
+  --auth-field-line: #6e736c;
+  --auth-accent: #7ea2ff;
+  --auth-accent-ink: #0f1830;
+  --auth-error: #ff9bb0;
+  --auth-focus: #aab6d8;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--auth-page);
+}
+
+body {
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  box-sizing: border-box;
+  min-height: 100vh;
+  color: var(--auth-ink);
+  font: 400 16px/1.5 var(--auth-font);
+}
+
+.auth-panel {
+  width: 100%;
+  max-width: 28rem;
+  margin: auto;
+  padding: clamp(1.25rem, 5vw, 2.5rem);
+  box-sizing: border-box;
+  background: var(--auth-surface);
+  color: var(--auth-ink);
+  border: 1px solid var(--auth-line);
+  border-radius: 1.25rem;
+}
+
+.auth-panel h1 {
+  margin: 0 0 1rem;
+  font-size: 1.65rem;
+  line-height: 1.2;
+  font-weight: 400;
+}
+
+/* The product name, as "aiaiaiai AIS × <product>". Only the product part takes
+   the accent colour; the rest stays neutral. */
+.auth-product {
+  margin: 0 0 0.25rem;
+  font-size: 0.875rem;
+  color: var(--auth-muted);
+}
+.auth-product .auth-product-name {
+  color: var(--auth-accent);
+}
+
+.auth-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.auth-form label {
+  font-size: 0.875rem;
+  color: var(--auth-muted);
+}
+
+.auth-field {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--auth-field-line);
+  border-radius: 0.65rem;
+  background: transparent;
+}
+
+.auth-field input {
+  width: 100%;
+  min-width: 0;
+  padding: 0.65rem 0.25rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+/* The cell variant: a fixed "0x", one hex digit to choose, then the slug. */
+.auth-cell .auth-field .auth-prefix {
+  padding: 0.65rem 0.2rem;
+  color: var(--auth-muted);
+  white-space: nowrap;
+}
+.auth-cell select {
+  font: inherit;
+  padding: 0.65rem 0.2rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.auth-button {
+  min-width: 44px;
+  min-height: 44px;
+  margin-top: 0.5rem;
+  padding: 0.6rem 1rem;
+  border: 0;
+  border-radius: 0.65rem;
+  background: var(--auth-accent);
+  color: var(--auth-accent-ink);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.auth-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.auth-text-action {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--auth-accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.auth-note {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--auth-muted);
+}
+
+.auth-error {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--auth-error);
+}
+
+.auth-panel :focus-visible {
+  outline: 2px solid var(--auth-focus);
+  outline-offset: 3px;
+  border-radius: 0.25rem;
+}
+
+/* Password managers fill the form; their autofill tint must not fight the theme. */
+.auth-field input:-webkit-autofill {
+  -webkit-text-fill-color: var(--auth-ink);
+  transition: background-color 9999s ease-out;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
