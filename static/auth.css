@@ -1,0 +1,251 @@
+/* © 2026 aiaiaiai · aiaiaiai.org */
+/* SPDX-License-Identifier: Apache-2.0 */
+
+/*
+ * Sign-in and registration page for aiaiaiai AIS.
+ * Selectors match packages/auth-view in nilx-one/web so this file can skin
+ * `@aiaiaiai/auth-view` directly (panel, form, address/password fields, digit
+ * selector, focus, 44px targets, autofill detection).
+ * Surfaces, text and type: aiaiaiai.org (#efefed page tone, white panel, Geist).
+ * The single accent is #185adb.
+ * The page is served with a strict CSP: fonts and styles come from this origin.
+ */
+
+/* Geist is bundled by the service and served from /static; font-src 'self'. */
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/static/fonts/geist-400.woff2') format('woff2');
+}
+
+:root {
+  color-scheme: light dark;
+  --auth-page: #efefed;
+  --auth-surface: #fff;
+  --auth-ink: #535653;
+  --auth-muted: #6f736f;
+  --auth-line: #d7dce4;
+  --auth-field-line: #8a97aa;
+  --auth-accent: #185adb;
+  --auth-accent-ink: #fff;
+  --auth-error: #a31b3a;
+  --auth-focus: #565f73;
+  --auth-font: 'Geist', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+/* Dark: the site's warm neutrals, inverted. The accent is lifted so it keeps
+   contrast on a dark surface; its text turns dark. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --auth-page: #121311;
+    --auth-surface: #1b1c1a;
+    --auth-ink: #e4e5e1;
+    --auth-muted: #a5a9a2;
+    --auth-line: #3a3d38;
+    --auth-field-line: #6e736c;
+    --auth-accent: #7ea2ff;
+    --auth-accent-ink: #0f1830;
+    --auth-error: #ff9bb0;
+    --auth-focus: #aab6d8;
+  }
+}
+:root[data-theme='dark'] {
+  --auth-page: #121311;
+  --auth-surface: #1b1c1a;
+  --auth-ink: #e4e5e1;
+  --auth-muted: #a5a9a2;
+  --auth-line: #3a3d38;
+  --auth-field-line: #6e736c;
+  --auth-accent: #7ea2ff;
+  --auth-accent-ink: #0f1830;
+  --auth-error: #ff9bb0;
+  --auth-focus: #aab6d8;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--auth-page);
+}
+
+body {
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  box-sizing: border-box;
+  min-height: 100vh;
+  color: var(--auth-ink);
+  font: 400 16px/1.5 var(--auth-font);
+}
+
+.ecosystem-auth-panel {
+  width: 100%;
+  max-width: 28rem;
+  margin: auto;
+  padding: clamp(1.25rem, 5vw, 2.5rem);
+  box-sizing: border-box;
+  background: var(--auth-surface);
+  color: var(--auth-ink);
+  border: 1px solid var(--auth-line);
+  border-radius: 1.25rem;
+}
+
+.ecosystem-auth-panel h1 {
+  margin: 0 0 1rem;
+  font-size: 1.65rem;
+  line-height: 1.2;
+  font-weight: 400;
+}
+
+.ecosystem-auth-panel > p {
+  margin: 0 0 1rem;
+  color: var(--auth-muted);
+}
+
+/* Product header from AuthView: the full "aiaiaiai AIS × <product>" string. */
+.ecosystem-auth-panel .auth-product-name {
+  margin: 0 0 0.25rem;
+  font-size: 0.875rem;
+  color: var(--auth-accent);
+  font-weight: 650;
+}
+
+.ecosystem-auth-panel .identity-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.ecosystem-auth-panel .surface-kicker {
+  font-size: 0.875rem;
+  color: var(--auth-muted);
+}
+
+.ecosystem-auth-panel .address-field,
+.ecosystem-auth-panel .password-field {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--auth-field-line);
+  border-radius: 0.65rem;
+  background: transparent;
+}
+
+.ecosystem-auth-panel input {
+  width: 100%;
+  min-width: 0;
+  padding: 0.65rem 0.25rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.ecosystem-auth-panel .address-prefix {
+  padding: 0.65rem 0.2rem;
+  color: var(--auth-muted);
+  white-space: nowrap;
+}
+
+.ecosystem-auth-panel .digit-selector {
+  display: flex;
+  align-items: center;
+}
+
+.ecosystem-auth-panel select {
+  font: inherit;
+  padding: 0.65rem 0.2rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.ecosystem-auth-panel .selector-chevron {
+  display: none;
+}
+
+.ecosystem-auth-panel button {
+  min-width: 44px;
+  min-height: 44px;
+  border: 0;
+  background: transparent;
+  color: var(--auth-accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ecosystem-auth-panel button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.ecosystem-auth-panel .text-action {
+  justify-self: start;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.ecosystem-auth-panel .identity-status,
+.ecosystem-auth-panel .password-note {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--auth-muted);
+}
+
+.ecosystem-auth-panel .identity-error {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--auth-error);
+}
+
+.ecosystem-auth-panel :focus-visible {
+  outline: 2px solid var(--auth-focus);
+  outline-offset: 3px;
+  border-radius: 0.25rem;
+}
+
+.ecosystem-auth-panel svg {
+  display: block;
+  width: 24px;
+  height: 24px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.5;
+}
+
+.ecosystem-auth-panel .visually-hidden,
+.ecosystem-auth-panel .password-field--autofill-proxy {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/*
+ * auth-view listens for animationName === "credential-autofill-start" on
+ * username/password inputs. Keep the keyframes and the :-webkit-autofill
+ * trigger; do not strip this animation under prefers-reduced-motion.
+ */
+@keyframes credential-autofill-start {
+  from {
+    opacity: 0.99;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.ecosystem-auth-panel input:-webkit-autofill {
+  -webkit-text-fill-color: var(--auth-ink);
+  transition: background-color 9999s ease-out;
+  animation-name: credential-autofill-start;
+  animation-duration: 1ms;
+}
