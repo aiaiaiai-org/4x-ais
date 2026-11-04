@@ -3,14 +3,14 @@
 
 # aiaiaiai AIS: the auth identity service
 
-Status: design, owner review pending. No code yet.
-Host: `auth.aiaiaiai.org` (edge-prod-2, DNS only).
+Status: identity runtime in design; temporary placeholder HTTP server and image publisher prepared.
+Host: `auth.aiaiaiai.org` (edge-prod-2; activation pending).
 Parent: [ECO-0001](https://github.com/aiaiaiai-org/.github/blob/main/ecosystem/identity/DESIGN.md),
 and `nilx-one/web` `docs/unified-auth.md` and `docs/identity-boundary.md`.
 
 ## What exists today
 
-Facts as of 2026-11-02. Nothing below is deployed.
+Identity implementation facts as of 2026-11-02. A standalone placeholder is being prepared; it is not an identity issuer.
 
 **`nilx-one/web`, `services/identity`** (the identity service that also runs
 0x1 today):
@@ -45,7 +45,7 @@ the placement is undecided.
 to 0x1, one admin role `gm`, a full wipe of existing users announced through
 the Telegram bot).
 
-**Not yet built**: the service itself in this repository, the second skin,
+**Not yet built**: the actual identity service (only a static placeholder exists), the second skin,
 the one-time prefix change, the event outbox, the wipe.
 
 ## What it owns
