@@ -260,6 +260,9 @@ for merge and deploy. If blocked, report the exact state reached.
 questions are in `docs/service-design.md`. A temporary placeholder HTTP server and image publisher exist; the actual identity service is not implemented yet.
 
 - Branches are `feat/*`, `fix/*`, and `docs/*`. Do not use `claude/*` names.
+- `.github/workflows/publish.yml` publishes the placeholder image from public
+  `master` only. While this repository is private the workflow stops before
+  the push. An unattested tag would stop infra delivery for the whole edge.
 - When Rust code exists, the gates are `cargo fmt --check`,
   `cargo clippy -D warnings`, and `cargo test`.
 - Licensed under Apache-2.0 (`LICENSE`, `NOTICE`). Every new file carries the

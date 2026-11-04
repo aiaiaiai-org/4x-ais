@@ -10,7 +10,7 @@ and `nilx-one/web` `docs/unified-auth.md` and `docs/identity-boundary.md`.
 
 ## What exists today
 
-Identity implementation facts as of 2026-11-02. A standalone placeholder is being prepared; it is not an identity issuer.
+Identity implementation facts as of 2026-11-02. The placeholder and the edge route below are as of 2026-11-04; neither is an identity issuer.
 
 **`nilx-one/web`, `services/identity`** (the identity service that also runs
 0x1 today):
@@ -36,9 +36,16 @@ Identity implementation facts as of 2026-11-02. A standalone placeholder is bein
   `aiaiaiai_accounts` table (migration 0042).
 - `client_pairwise_subject`: the per-client digest of the private subject.
 
-**`aiaiaiai-org/infra`**: the draft route for `auth.aiaiaiai.org` (PR #90) is
-on edge-prod-1. It is out of date: the host is on edge-prod-2 (DNS only), and
-the placement is undecided.
+**`aiaiaiai-org/infra`**: `auth.aiaiaiai.org` resolves to edge-prod-2, the
+same address as `aiaiaiai.org` (DNS only). The route to prepare is
+[infra#91](https://github.com/aiaiaiai-org/infra/pull/91): workload `4x-ais`
+on `aiaiaiai-edge`, port 1927, health `/healthz`, image
+`ghcr.io/aiaiaiai-org/4x-ais`. It serves this placeholder only.
+[infra#90](https://github.com/aiaiaiai-org/infra/pull/90) puts the host on
+edge-prod-1 in front of `nilxone-identity`; its contract check failed, and it
+must not be merged. Activate the edge only after this repository has published
+an attested image and `aiaiaiai-org/infra` can read that package. Until then a
+tag without provenance aborts delivery of the other workloads on the edge.
 
 **`nilx-one/web` docs**: `unified-auth.md` (contract), `identity-boundary.md`
 (the split: identity keeps people, 0x1 keeps the game, the seeds wallet moves
