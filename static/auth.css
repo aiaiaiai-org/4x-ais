@@ -3,7 +3,9 @@
 
 /*
  * Sign-in and registration page for aiaiaiai AIS.
- * Base: packages/auth-view in nilx-one/web (components, focus, touch targets).
+ * Selectors match packages/auth-view in nilx-one/web so this file can skin
+ * `@aiaiaiai/auth-view` directly (panel, form, address/password fields, digit
+ * selector, focus, 44px targets, autofill detection).
  * Surfaces, text and type: aiaiaiai.org (#efefed page tone, white panel, Geist).
  * The single accent is #185adb.
  * The page is served with a strict CSP: fonts and styles come from this origin.
@@ -79,7 +81,7 @@ body {
   font: 400 16px/1.5 var(--auth-font);
 }
 
-.auth-panel {
+.ecosystem-auth-panel {
   width: 100%;
   max-width: 28rem;
   margin: auto;
@@ -91,35 +93,38 @@ body {
   border-radius: 1.25rem;
 }
 
-.auth-panel h1 {
+.ecosystem-auth-panel h1 {
   margin: 0 0 1rem;
   font-size: 1.65rem;
   line-height: 1.2;
   font-weight: 400;
 }
 
-/* The product name, as "aiaiaiai AIS × <product>". Only the product part takes
-   the accent colour; the rest stays neutral. */
-.auth-product {
-  margin: 0 0 0.25rem;
-  font-size: 0.875rem;
+.ecosystem-auth-panel > p {
+  margin: 0 0 1rem;
   color: var(--auth-muted);
 }
-.auth-product .auth-product-name {
+
+/* Product header from AuthView: the full "aiaiaiai AIS × <product>" string. */
+.ecosystem-auth-panel .auth-product-name {
+  margin: 0 0 0.25rem;
+  font-size: 0.875rem;
   color: var(--auth-accent);
+  font-weight: 650;
 }
 
-.auth-form {
+.ecosystem-auth-panel .identity-form {
   display: grid;
   gap: 0.75rem;
 }
 
-.auth-form label {
+.ecosystem-auth-panel .surface-kicker {
   font-size: 0.875rem;
   color: var(--auth-muted);
 }
 
-.auth-field {
+.ecosystem-auth-panel .address-field,
+.ecosystem-auth-panel .password-field {
   display: flex;
   align-items: center;
   min-width: 0;
@@ -129,7 +134,7 @@ body {
   background: transparent;
 }
 
-.auth-field input {
+.ecosystem-auth-panel input {
   width: 100%;
   min-width: 0;
   padding: 0.65rem 0.25rem;
@@ -139,13 +144,18 @@ body {
   font: inherit;
 }
 
-/* The cell variant: a fixed "0x", one hex digit to choose, then the slug. */
-.auth-cell .auth-field .auth-prefix {
+.ecosystem-auth-panel .address-prefix {
   padding: 0.65rem 0.2rem;
   color: var(--auth-muted);
   white-space: nowrap;
 }
-.auth-cell select {
+
+.ecosystem-auth-panel .digit-selector {
+  display: flex;
+  align-items: center;
+}
+
+.ecosystem-auth-panel select {
   font: inherit;
   padding: 0.65rem 0.2rem;
   border: 0;
@@ -153,60 +163,61 @@ body {
   color: inherit;
 }
 
-.auth-button {
-  min-width: 44px;
-  min-height: 44px;
-  margin-top: 0.5rem;
-  padding: 0.6rem 1rem;
-  border: 0;
-  border-radius: 0.65rem;
-  background: var(--auth-accent);
-  color: var(--auth-accent-ink);
-  font: inherit;
-  font-weight: 500;
-  cursor: pointer;
-}
-.auth-button:disabled {
-  opacity: 0.45;
-  cursor: default;
+.ecosystem-auth-panel .selector-chevron {
+  display: none;
 }
 
-.auth-text-action {
-  justify-self: start;
-  padding: 0;
+.ecosystem-auth-panel button {
+  min-width: 44px;
+  min-height: 44px;
   border: 0;
   background: transparent;
   color: var(--auth-accent);
   font: inherit;
-  text-decoration: underline;
   cursor: pointer;
 }
 
-.auth-note {
+.ecosystem-auth-panel button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.ecosystem-auth-panel .text-action {
+  justify-self: start;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.ecosystem-auth-panel .identity-status,
+.ecosystem-auth-panel .password-note {
   margin: 0;
   font-size: 0.875rem;
   color: var(--auth-muted);
 }
 
-.auth-error {
+.ecosystem-auth-panel .identity-error {
   margin: 0;
   font-size: 0.875rem;
   color: var(--auth-error);
 }
 
-.auth-panel :focus-visible {
+.ecosystem-auth-panel :focus-visible {
   outline: 2px solid var(--auth-focus);
   outline-offset: 3px;
   border-radius: 0.25rem;
 }
 
-/* Password managers fill the form; their autofill tint must not fight the theme. */
-.auth-field input:-webkit-autofill {
-  -webkit-text-fill-color: var(--auth-ink);
-  transition: background-color 9999s ease-out;
+.ecosystem-auth-panel svg {
+  display: block;
+  width: 24px;
+  height: 24px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.5;
 }
 
-.visually-hidden {
+.ecosystem-auth-panel .visually-hidden,
+.ecosystem-auth-panel .password-field--autofill-proxy {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -218,9 +229,23 @@ body {
   border: 0;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  * {
-    transition: none !important;
-    animation: none !important;
+/*
+ * auth-view listens for animationName === "credential-autofill-start" on
+ * username/password inputs. Keep the keyframes and the :-webkit-autofill
+ * trigger; do not strip this animation under prefers-reduced-motion.
+ */
+@keyframes credential-autofill-start {
+  from {
+    opacity: 0.99;
   }
+  to {
+    opacity: 1;
+  }
+}
+
+.ecosystem-auth-panel input:-webkit-autofill {
+  -webkit-text-fill-color: var(--auth-ink);
+  transition: background-color 9999s ease-out;
+  animation-name: credential-autofill-start;
+  animation-duration: 1ms;
 }
