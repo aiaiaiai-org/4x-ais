@@ -257,8 +257,7 @@ for merge and deploy. If blocked, report the exact state reached.
 ## Repository
 
 `4x-ais` is the aiaiaiai auth identity service. Product scope and open
-questions are in `docs/service-design.md`. There is no application code yet,
-and this repository does not deploy.
+questions are in `docs/service-design.md`. A temporary placeholder HTTP server and image publisher exist; the actual identity service is not implemented yet.
 
 - Branches are `feat/*`, `fix/*`, and `docs/*`. Do not use `claude/*` names.
 - When Rust code exists, the gates are `cargo fmt --check`,
