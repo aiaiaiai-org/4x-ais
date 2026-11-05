@@ -37,15 +37,15 @@ Identity implementation facts as of 2026-11-02. The placeholder and the edge rou
 - `client_pairwise_subject`: the per-client digest of the private subject.
 
 **`aiaiaiai-org/infra`**: `auth.aiaiaiai.org` resolves to edge-prod-2, the
-same address as `aiaiaiai.org` (DNS only). The route to prepare is
-[infra#91](https://github.com/aiaiaiai-org/infra/pull/91): workload `4x-ais`
-on `aiaiaiai-edge`, port 1927, health `/healthz`, image
-`ghcr.io/aiaiaiai-org/4x-ais`. It serves this placeholder only.
-[infra#90](https://github.com/aiaiaiai-org/infra/pull/90) puts the host on
-edge-prod-1 in front of `nilxone-identity`; its contract check failed, and it
-must not be merged. Activate the edge only after this repository has published
-an attested image and `aiaiaiai-org/infra` can read that package. Until then a
-tag without provenance aborts delivery of the other workloads on the edge.
+same address as `aiaiaiai.org` (DNS only). The route is on infra `master`
+([infra#90](https://github.com/aiaiaiai-org/infra/pull/90) and
+[infra#94](https://github.com/aiaiaiai-org/infra/pull/94)): workload `4x-ais`
+on `aiaiaiai-edge`, port 1927, health `/healthz`. The edge skips the workload
+while its container is absent. The workload has no automatic delivery yet: it
+is added in its own infra change once this repository has published an
+attested image and `aiaiaiai-org/infra` can read the package, because a tag
+the planner cannot read or verify aborts delivery of every other workload on
+the edge. Not deployed.
 
 **`nilx-one/web` docs**: `unified-auth.md` (contract), `identity-boundary.md`
 (the split: identity keeps people, 0x1 keeps the game, the seeds wallet moves
