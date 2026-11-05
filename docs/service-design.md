@@ -3,14 +3,14 @@
 
 # aiaiaiai AIS: the auth identity service
 
-Status: design, owner review pending. No code yet.
-Host: `auth.aiaiaiai.org` (edge-prod-2, DNS only).
+Status: identity runtime in design; temporary placeholder HTTP server and image publisher prepared.
+Host: `auth.aiaiaiai.org` (edge-prod-2; activation pending).
 Parent: [ECO-0001](https://github.com/aiaiaiai-org/.github/blob/main/ecosystem/identity/DESIGN.md),
 and `nilx-one/web` `docs/unified-auth.md` and `docs/identity-boundary.md`.
 
 ## What exists today
 
-Facts as of 2026-11-02. Nothing below is deployed.
+Identity implementation facts as of 2026-11-02. The placeholder and the edge route below are as of 2026-11-04; neither is an identity issuer.
 
 **`nilx-one/web`, `services/identity`** (the identity service that also runs
 0x1 today):
@@ -36,16 +36,23 @@ Facts as of 2026-11-02. Nothing below is deployed.
   `aiaiaiai_accounts` table (migration 0042).
 - `client_pairwise_subject`: the per-client digest of the private subject.
 
-**`aiaiaiai-org/infra`**: the draft route for `auth.aiaiaiai.org` (PR #90) is
-on edge-prod-1. It is out of date: the host is on edge-prod-2 (DNS only), and
-the placement is undecided.
+**`aiaiaiai-org/infra`**: `auth.aiaiaiai.org` resolves to edge-prod-2, the
+same address as `aiaiaiai.org` (DNS only). The route is on infra `master`
+([infra#90](https://github.com/aiaiaiai-org/infra/pull/90) and
+[infra#94](https://github.com/aiaiaiai-org/infra/pull/94)): workload `4x-ais`
+on `aiaiaiai-edge`, port 1927, health `/healthz`. The edge skips the workload
+while its container is absent. The workload has no automatic delivery yet: it
+is added in its own infra change once this repository has published an
+attested image and `aiaiaiai-org/infra` can read the package, because a tag
+the planner cannot read or verify aborts delivery of every other workload on
+the edge. Not deployed.
 
 **`nilx-one/web` docs**: `unified-auth.md` (contract), `identity-boundary.md`
 (the split: identity keeps people, 0x1 keeps the game, the seeds wallet moves
 to 0x1, one admin role `gm`, a full wipe of existing users announced through
 the Telegram bot).
 
-**Not yet built**: the service itself in this repository, the second skin,
+**Not yet built**: the actual identity service (only a static placeholder exists), the second skin,
 the one-time prefix change, the event outbox, the wipe.
 
 ## What it owns

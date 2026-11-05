@@ -1,0 +1,89 @@
+# © 2026 aiaiaiai · aiaiaiai.org
+# SPDX-License-Identifier: Apache-2.0
+# Publishes the placeholder image for the current master head and attests it.
+# aiaiaiai-org/infra delivers that attested digest on its own
+# (infra docs/automatic-delivery.md). This repository holds no infra credential.
+name: Publish image
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+concurrency:
+  group: 4x-ais-publish
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Smoke test placeholder endpoints
+        run: bash scripts/smoke-placeholder.sh
+      - name: Publish only from public master
+        env:
+          VISIBILITY: ${{ github.repository_visibility }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/master" ]]; then
+            echo "::error::Publish runs only for refs/heads/master (got $GITHUB_REF)."
+            exit 1
+          fi
+          # Attestations are for public repositories unless the plan offers
+          # them. A private push would leave a SHA tag, and infra aborts every
+          # delivery on the edge when that tag has no provenance.
+          if [[ "$VISIBILITY" != "public" ]]; then
+            echo "::error::Refusing to publish while 4x-ais is private. Make the repository public, then re-run this workflow. See infra docs/automatic-delivery.md."
+            exit 1
+          fi
+      - name: Authenticate to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish
+        id: image
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/aiaiaiai-org/4x-ais:${GITHUB_SHA}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+          REF="$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE")"
+          [[ "$REF" =~ ^ghcr\.io/.+@(sha256:[0-9a-f]{64})$ ]]
+          echo "digest=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+      - name: Attest published image
+        id: attest
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/aiaiaiai-org/4x-ais
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+      - name: Delete the tag when provenance is missing
+        if: failure() && steps.image.outputs.pushed == 'true' && steps.attest.outcome != 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_SHA"
+          id=""
+          for _ in $(seq 1 10); do
+            id="$(gh api --paginate "/orgs/aiaiaiai-org/packages/container/4x-ais/versions" \
+              --jq "[.[] | select(any(.metadata.container.tags[]?; . == \"$tag\")) | .id][0] // empty" \
+              | head -n 1)"
+            if [[ -n "$id" ]]; then
+              break
+            fi
+            sleep 2
+          done
+          if [[ -z "$id" ]]; then
+            echo "::error::ghcr.io/aiaiaiai-org/4x-ais:$tag was pushed without provenance and could not be deleted. Delete that tag before infra plans deliveries."
+            exit 1
+          fi
+          gh api --method DELETE "/orgs/aiaiaiai-org/packages/container/4x-ais/versions/$id"
+          echo "Deleted package version $id tagged $tag"
