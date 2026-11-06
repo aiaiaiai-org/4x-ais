@@ -81,10 +81,10 @@ being rewritten.
 The security rules and the flow are the same for every client. A client differs
 only in presentation, set by the server's client registry (ECO-0001 §4):
 
-| Skin   | Who                                         | Header                    | Prefix                            |
-| ------ | ------------------------------------------- | ------------------------- | --------------------------------- |
-| `cell` | 0x-friendly products: 0x1, 0xda-market      | aiaiaiai AIS × 0x1        | the person sees and chooses `0x` + hex digit |
-| `slug` | serious clients: Prism, and other products  | aiaiaiai AIS × Prism      | never shown; the service assigns it |
+| Skin   | Who                                        | Header               | Prefix                                                           |
+| ------ | ------------------------------------------ | -------------------- | ---------------------------------------------------------------- |
+| `cell` | 0x-friendly products: 0x1, 0xda-market     | aiaiaiai AIS × 0x1   | the person sees and chooses the whole prefix, one of `0x0`–`0xf` |
+| `slug` | serious clients: Prism, and other products | aiaiaiai AIS × Prism | never shown; the service assigns it                              |
 
 The header names the product, as `aiaiaiai AIS × <product>`. The prefix is a
 presentation choice only: the same `pub_dress` format and the same identity
@@ -92,7 +92,12 @@ underneath.
 
 ## Prefix rules
 
-- Any hex digit `0`–`f` is valid.
+- Any hex digit `0`–`f` is valid, so there are sixteen prefixes, `0x0`–`0xf`.
+- **The prefix is chosen as a whole.** The person picks one of the sixteen
+  prefixes (`0x0`, `0x1`, …, `0xf`) as a single choice, not a fixed `0x`
+  followed by a separate digit. The address grammar does not change
+  (`0x` + one hex digit + slug); only what the person picks does. The same
+  applies to the one-time change below: the offer lists whole prefixes.
 - **`cell` products:** a new person picks the prefix and the slug.
 - **`slug` products:** the service assigns the prefix. For now at random.
   Later it will derive a suggestion from the mailbox, for example
@@ -109,6 +114,14 @@ underneath.
   - Assumption to confirm: a person who already chose a prefix in a `cell`
     product gets no second change.
   - A change keeps the identity and its `sub`; only the public address moves.
+
+### Follow-up outside this repository
+
+`packages/auth-view` in `nilx-one/web` still renders a fixed `0x` and a
+separate digit selector (`.address-prefix`, `.digit-selector`). The 0x1 entry
+point keeps that until the component is changed to a whole-prefix selector,
+in its own change there. `static/auth.css` here skins the component as it is
+today.
 
 ## Cross-service: no tunnel
 
