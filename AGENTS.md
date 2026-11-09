@@ -257,14 +257,18 @@ for merge and deploy. If blocked, report the exact state reached.
 ## Repository
 
 `4x-ais` is the aiaiaiai auth identity service. Product scope and open
-questions are in `docs/service-design.md`. A temporary placeholder HTTP server and image publisher exist; the actual identity service is not implemented yet.
+questions are in `docs/service-design.md`; configuration and the secret
+envelope are in `docs/runtime.md`. The service is Rust (`src/`).
 
 - Branches are `feat/*`, `fix/*`, and `docs/*`. Do not use `claude/*` names.
-- `.github/workflows/publish.yml` publishes the placeholder image from public
+- `.github/workflows/publish.yml` publishes the service image from public
   `master` only. While this repository is private the workflow stops before
   the push. An unattested tag would stop infra delivery for the whole edge.
-- When Rust code exists, the gates are `cargo fmt --check`,
-  `cargo clippy -D warnings`, and `cargo test`.
+- The gates are `cargo fmt --all -- --check`, `cargo clippy --locked
+  --all-targets -- -D warnings`, `cargo test --locked` and
+  `bash scripts/smoke.sh`.
+- The token contract is the one `nilx-one/core` `aiaiaiai_sign_in` verifies;
+  the tests run that verifier. Change both together or neither.
 - Licensed under Apache-2.0 (`LICENSE`, `NOTICE`). Every new file carries the
   copyright header and `SPDX-License-Identifier: Apache-2.0`. On the shared
   agent files, that notice line is the only local addition.

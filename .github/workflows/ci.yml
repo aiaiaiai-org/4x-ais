@@ -41,13 +41,23 @@ jobs:
       - name: Test shared sync checker
         run: ruby scripts/test-shared-sync.rb
 
-  placeholder:
-    name: Placeholder
+  service:
+    name: Service
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Smoke test placeholder endpoints
-        run: bash scripts/smoke-placeholder.sh
+      # rust-toolchain.toml pins the compiler with clippy and rustfmt.
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Lint
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Smoke test the built service
+        run: bash scripts/smoke.sh

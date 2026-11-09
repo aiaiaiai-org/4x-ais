@@ -1,6 +1,6 @@
 # © 2026 aiaiaiai · aiaiaiai.org
 # SPDX-License-Identifier: Apache-2.0
-# Publishes the placeholder image for the current master head and attests it.
+# Publishes the service image for the current master head and attests it.
 # aiaiaiai-org/infra delivers that attested digest on its own
 # (infra docs/automatic-delivery.md). This repository holds no infra credential.
 name: Publish image
@@ -22,8 +22,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Smoke test placeholder endpoints
-        run: bash scripts/smoke-placeholder.sh
+      - name: Smoke test the built service
+        run: bash scripts/smoke.sh
       - name: Publish only from public master
         env:
           VISIBILITY: ${{ github.repository_visibility }}
