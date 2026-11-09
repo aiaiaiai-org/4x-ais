@@ -21,15 +21,14 @@ const SCHEMA: &str = r"
 CREATE TABLE IF NOT EXISTS identities (
     subject BLOB PRIMARY KEY NOT NULL CHECK (length(subject) = 32),
     pub_dress TEXT NOT NULL UNIQUE COLLATE BINARY,
-    slug TEXT NOT NULL COLLATE BINARY,
-    -- The canonical DNS label of the address. Unique, so two addresses that
-    -- read alike cannot both be taken.
+    -- The canonical (UTS-46) DNS label of the address. Unique, so two
+    -- addresses that read alike cannot both be taken, and every lookup goes
+    -- through it, so a person finds their address however they type its case.
     label TEXT NOT NULL UNIQUE COLLATE NOCASE,
     prefix_assigned INTEGER NOT NULL CHECK (prefix_assigned IN (0, 1)),
     password_hash TEXT NOT NULL,
     created_at INTEGER NOT NULL CHECK (created_at >= 0)
 ) STRICT;
-CREATE INDEX IF NOT EXISTS identities_by_slug ON identities (slug);
 ";
 
 #[derive(Debug, thiserror::Error)]
@@ -75,24 +74,43 @@ impl Store {
         Ok(Self { pool })
     }
 
+    /// The address that reads like this one, as it was registered.
     pub async fn find(&self, pub_dress: &PubDress) -> Result<Option<Identity>, StoreError> {
-        let row = sqlx::query(
-            "SELECT subject, pub_dress, password_hash FROM identities WHERE pub_dress = ?",
-        )
-        .bind(pub_dress.as_str())
-        .fetch_optional(&self.pool)
-        .await?;
+        let Ok(label) = PubDressLabel::stem(pub_dress) else {
+            return Ok(None);
+        };
+        let row =
+            sqlx::query("SELECT subject, pub_dress, password_hash FROM identities WHERE label = ?")
+                .bind(label.as_str())
+                .fetch_optional(&self.pool)
+                .await?;
         Ok(row.map(identity))
     }
 
-    /// Every address with this slug, whatever its prefix.
+    /// Every address that reads like `0x?{slug}`, whatever its prefix.
     pub async fn find_by_slug(&self, slug: &str) -> Result<Vec<Identity>, StoreError> {
-        let rows = sqlx::query(
-            "SELECT subject, pub_dress, password_hash FROM identities WHERE slug = ? ORDER BY pub_dress",
-        )
-        .bind(slug)
-        .fetch_all(&self.pool)
-        .await?;
+        let labels: Vec<String> = DISCRIMINATORS
+            .iter()
+            .filter_map(|discriminator| {
+                let address = PubDress::from_str(&format!("0x{discriminator}{slug}")).ok()?;
+                PubDressLabel::stem(&address)
+                    .ok()
+                    .map(|label| label.as_str().to_owned())
+            })
+            .collect();
+        if labels.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = vec!["?"; labels.len()].join(", ");
+        let sql = format!(
+            "SELECT subject, pub_dress, password_hash FROM identities \
+             WHERE label IN ({placeholders}) ORDER BY pub_dress"
+        );
+        let mut query = sqlx::query(&sql);
+        for label in &labels {
+            query = query.bind(label);
+        }
+        let rows = query.fetch_all(&self.pool).await?;
         Ok(rows.into_iter().map(identity).collect())
     }
 
@@ -102,13 +120,11 @@ impl Store {
         let Ok(label) = PubDressLabel::stem(pub_dress) else {
             return Ok(false);
         };
-        let taken: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM identities WHERE pub_dress = ? OR label = ?)",
-        )
-        .bind(pub_dress.as_str())
-        .bind(label.as_str())
-        .fetch_one(&self.pool)
-        .await?;
+        let taken: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM identities WHERE label = ?)")
+                .bind(label.as_str())
+                .fetch_one(&self.pool)
+                .await?;
         Ok(!taken)
     }
 
@@ -145,12 +161,11 @@ impl Store {
         let subject = crate::crypto::random_bytes::<32>().ok_or(StoreError::Entropy)?;
         let created_at = i64::try_from(now).unwrap_or(i64::MAX);
         let result = sqlx::query(
-            "INSERT INTO identities (subject, pub_dress, slug, label, prefix_assigned, password_hash, created_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO identities (subject, pub_dress, label, prefix_assigned, password_hash, created_at) \
+             VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(subject.as_slice())
         .bind(pub_dress.as_str())
-        .bind(pub_dress.slug())
         .bind(label.as_str())
         .bind(i64::from(prefix_assigned))
         .bind(password_hash)
@@ -226,6 +241,11 @@ mod tests {
             .unwrap();
         let alike = address("0x0sky");
         assert!(!store.is_free(&alike).await.unwrap());
+        // However it is typed, the person finds the address they registered.
+        let found = store.find(&alike).await.unwrap().expect("found alike");
+        assert_eq!(found.pub_dress, "0x0Sky");
+        let by_slug = store.find_by_slug("SKY").await.unwrap();
+        assert_eq!(by_slug, vec![found]);
         assert_eq!(
             store.register(&alike, false, "hash", 2).await.unwrap(),
             Registration::Taken

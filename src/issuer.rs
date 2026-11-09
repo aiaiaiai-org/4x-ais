@@ -26,7 +26,7 @@ use base64::{
     Engine as _,
     engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
 };
-use nilxone_contracts::PubDress;
+use nilxone_contracts::{PubDress, PubDressLabel};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use subtle::ConstantTimeEq as _;
@@ -464,6 +464,15 @@ impl Ctx<'_> {
         )
     }
 
+    /// The sign-in step for an address as it was registered, which may differ
+    /// in case from what the person typed.
+    fn sign_in_as(&self, identity: &Identity) -> Response {
+        let slug = PubDress::from_str(&identity.pub_dress)
+            .map(|address| address.slug().to_owned())
+            .unwrap_or_default();
+        self.sign_in_step(&identity.pub_dress, &slug, None, StatusCode::OK)
+    }
+
     fn sign_in_step(
         &self,
         pub_dress: &str,
@@ -475,15 +484,25 @@ impl Ctx<'_> {
     }
 }
 
+/// The client address as the edge saw it. Only the last hop is the edge's own:
+/// anything before it arrived from the client and is whatever the client
+/// wanted, so trusting the first hop would let anyone pick their own limit key.
 fn request_source(headers: &HeaderMap) -> String {
     headers
         .get("x-forwarded-for")
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(',').next())
+        .and_then(|value| value.rsplit(',').next())
         .map(str::trim)
         .filter(|value| !value.is_empty() && value.len() <= 64)
         .unwrap_or("unknown")
         .to_owned()
+}
+
+/// Whether the address has a public label. `PubDress` accepts some spellings
+/// (punctuation, edge hyphens) that no label can carry; those are invalid
+/// input, not taken addresses.
+fn representable(address: &PubDress) -> bool {
+    PubDressLabel::stem(address).is_ok()
 }
 
 fn parse_prefix(value: &str) -> Option<char> {
@@ -545,8 +564,9 @@ async fn identify(ctx: &Ctx<'_>, form: &SubmitForm) -> Response {
         // The prefix plays no part in whether a slug is valid.
         Skin::Slug => Some('0'),
     };
-    let Some(candidate) =
-        prefix.and_then(|prefix| PubDress::from_str(&format!("0x{prefix}{slug}")).ok())
+    let Some(candidate) = prefix
+        .and_then(|prefix| PubDress::from_str(&format!("0x{prefix}{slug}")).ok())
+        .filter(representable)
     else {
         return ctx.identify_again(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -576,9 +596,7 @@ async fn identify(ctx: &Ctx<'_>, form: &SubmitForm) -> Response {
     };
     match ctx.client.skin {
         Skin::Cell => match ctx.state.store.find(&candidate).await {
-            Ok(Some(identity)) => {
-                ctx.sign_in_step(&identity.pub_dress, candidate.slug(), None, StatusCode::OK)
-            }
+            Ok(Some(identity)) => ctx.sign_in_as(&identity),
             Ok(None) => match ctx.state.store.is_free(&candidate).await {
                 Ok(true) => ctx.register_step(&candidate, None, StatusCode::OK),
                 Ok(false) => ctx.identify_again(
@@ -601,9 +619,7 @@ async fn identify(ctx: &Ctx<'_>, form: &SubmitForm) -> Response {
                     Err(_) => unavailable(),
                 }
             }
-            Ok(found) if found.len() == 1 => {
-                ctx.sign_in_step(&found[0].pub_dress, candidate.slug(), None, StatusCode::OK)
-            }
+            Ok(found) if found.len() == 1 => ctx.sign_in_as(&found[0]),
             Ok(found) => {
                 let prefixes: Vec<char> = found
                     .iter()
@@ -629,6 +645,7 @@ async fn choose(ctx: &Ctx<'_>, form: &SubmitForm) -> Response {
     let slug = form.slug.trim();
     let Some(candidate) = parse_prefix(&form.prefix)
         .and_then(|prefix| PubDress::from_str(&format!("0x{prefix}{slug}")).ok())
+        .filter(representable)
     else {
         return ctx.identify_again(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -637,10 +654,22 @@ async fn choose(ctx: &Ctx<'_>, form: &SubmitForm) -> Response {
             slug,
         );
     };
+    // The same lookup budget as `identify`: otherwise this step would probe
+    // which prefixes of a slug are taken without limit.
+    if !ctx
+        .state
+        .limiter
+        .allow(&format!("resolve:{}", ctx.source), ctx.now, 60, 60)
+    {
+        return ctx.identify_again(
+            StatusCode::TOO_MANY_REQUESTS,
+            Message::RateLimited,
+            '0',
+            slug,
+        );
+    }
     match ctx.state.store.find(&candidate).await {
-        Ok(Some(identity)) => {
-            ctx.sign_in_step(&identity.pub_dress, candidate.slug(), None, StatusCode::OK)
-        }
+        Ok(Some(identity)) => ctx.sign_in_as(&identity),
         Ok(None) => ctx.identify_again(
             StatusCode::UNPROCESSABLE_ENTITY,
             Message::InvalidCredentials,
@@ -656,7 +685,13 @@ async fn choose(ctx: &Ctx<'_>, form: &SubmitForm) -> Response {
 }
 
 async fn sign_in(ctx: &Ctx<'_>, form: &SubmitForm) -> Response {
-    let Ok(pub_dress) = PubDress::from_str(&form.pub_dress) else {
+    let Some((pub_dress, label)) = PubDress::from_str(&form.pub_dress)
+        .ok()
+        .and_then(|address| {
+            let label = PubDressLabel::stem(&address).ok()?.as_str().to_owned();
+            Some((address, label))
+        })
+    else {
         return ctx.identify_again(
             StatusCode::UNPROCESSABLE_ENTITY,
             Message::InvalidAddress,
@@ -668,7 +703,9 @@ async fn sign_in(ctx: &Ctx<'_>, form: &SubmitForm) -> Response {
         ctx.sign_in_step(pub_dress.as_str(), pub_dress.slug(), Some(message), status)
     };
     let source_key = format!("auth:source:{}", ctx.source);
-    let address_key = format!("auth:address:{}", pub_dress.as_str());
+    // Keyed by the canonical label, so case variants of one address share
+    // one lock.
+    let address_key = format!("auth:address:{label}");
     if !ctx.state.limiter.allow(&source_key, ctx.now, 20, 15 * 60)
         || !ctx.state.limiter.allow(&address_key, ctx.now, 10, 15 * 60)
         || !ctx.state.limiter.allow("auth:global", ctx.now, 2_000, 60)
@@ -762,7 +799,13 @@ async fn register(ctx: &Ctx<'_>, form: &SubmitForm) -> Response {
         .await
     {
         Ok(Registration::Registered(identity)) => complete(ctx, &identity).await,
-        Ok(Registration::Taken | Registration::Unrepresentable) => ctx.identify_again(
+        Ok(Registration::Unrepresentable) => ctx.identify_again(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Message::InvalidAddress,
+            '0',
+            assigned.slug(),
+        ),
+        Ok(Registration::Taken) => ctx.identify_again(
             StatusCode::CONFLICT,
             Message::Taken,
             match ctx.client.skin {

@@ -418,6 +418,100 @@ async fn a_shared_slug_asks_which_address_is_yours() {
 }
 
 #[tokio::test]
+async fn a_returning_person_is_found_however_they_type_the_case() {
+    let app = app().await;
+    register_cell(&app, "0", "Sky").await;
+
+    // 0x1 (`cell`): the lowercase spelling signs in, it does not report "taken".
+    let flow = open(&app, "nilx-one", ONE_CALLBACK, None).await;
+    let page = flow
+        .post(
+            &app,
+            &[("step", "identify"), ("prefix", "0"), ("slug", "sky")],
+        )
+        .await;
+    assert_eq!(page.status, StatusCode::OK, "{}", page.body);
+    assert!(
+        page.body.contains("autocomplete=\"current-password\"")
+            && page.body.contains("value=\"0x0Sky\""),
+        "{}",
+        page.body
+    );
+
+    // Prism (`slug`): the person is not routed into a second account.
+    let flow = open(&app, "prism", PRISM_CALLBACK, None).await;
+    let page = flow
+        .post(&app, &[("step", "identify"), ("slug", "SKY")])
+        .await;
+    assert!(
+        page.body.contains("autocomplete=\"current-password\"")
+            && page.body.contains("value=\"0x0Sky\""),
+        "{}",
+        page.body
+    );
+}
+
+#[tokio::test]
+async fn an_address_without_a_public_label_is_invalid_not_taken() {
+    use std::str::FromStr as _;
+    // The case under test: the grammar accepts it, the label does not.
+    let edge = nilxone_contracts::PubDress::from_str("0x0sky-").expect("grammar accepts");
+    assert!(nilxone_contracts::PubDressLabel::stem(&edge).is_err());
+
+    let app = app().await;
+    let cell = open(&app, "nilx-one", ONE_CALLBACK, None).await;
+    let page = cell
+        .post(
+            &app,
+            &[("step", "identify"), ("prefix", "0"), ("slug", "sky-")],
+        )
+        .await;
+    assert_eq!(
+        page.status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{}",
+        page.body
+    );
+    let slug = open(&app, "prism", PRISM_CALLBACK, None).await;
+    let page = slug
+        .post(&app, &[("step", "identify"), ("slug", "sky-")])
+        .await;
+    assert_eq!(
+        page.status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{}",
+        page.body
+    );
+}
+
+#[tokio::test]
+async fn a_client_cannot_choose_its_own_limit_key() {
+    let app = app().await;
+    let flow = open(&app, "prism", PRISM_CALLBACK, None).await;
+    let mut last = StatusCode::OK;
+    for attempt in 0..61 {
+        let body = url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs([
+                ("request", flow.request.as_str()),
+                ("step", "identify"),
+                ("slug", "nobody"),
+            ])
+            .finish();
+        // The client invents a new first hop each time; the edge appends the
+        // address it actually saw.
+        let request = Request::post("/authorize")
+            .header(header::HOST, HOST_NAME)
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .header(header::COOKIE, &flow.cookie)
+            .header("x-forwarded-for", format!("10.0.0.{attempt}, 203.0.113.7"))
+            .body(Body::from(body))
+            .unwrap();
+        last = send(&app, request).await.status;
+    }
+    assert_eq!(last, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
 async fn one_person_is_a_different_sub_for_each_product() {
     let app = app().await;
     let (one, reply) = register_cell(&app, "0", "sky").await;
