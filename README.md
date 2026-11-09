@@ -3,18 +3,27 @@
 
 # 4x-ais
 
-The aiaiaiai auth identity service. Scope and open questions are in
-[docs/service-design.md](docs/service-design.md).
+The aiaiaiai auth identity service: the one sign-in page every product sends
+people to, at `auth.aiaiaiai.org`. Scope and decisions are in
+[docs/service-design.md](docs/service-design.md); configuration and the
+secret envelope are in [docs/runtime.md](docs/runtime.md).
 
-The identity service is not implemented. `server.py` is a temporary landing
-page: `GET /`, `GET /healthz`, and `GET /static/auth.css`. It has no sign-in,
-registration, session, or issuer. `.github/workflows/publish.yml` publishes
-`ghcr.io/aiaiaiai-org/4x-ais:<commit>` from public `master` and attests that
-image. A private repository on this org's plan cannot attest, so the workflow
-does not push until the repository is public.
+A Rust service (axum, SQLite). It owns people, their `pub_dress` and native
+password, and the OpenID Connect issuer (code + PKCE, pairwise `sub`, EdDSA
+`id_token`). It owns no product state. 0x1 reaches it only through
+`nilx-one/core`'s `aiaiaiai_sign_in` client; the token contract here is the
+one that client verifies, and the tests run that verifier.
 
-`auth.aiaiaiai.org` is on edge-prod-2 and is not activated. The route is
-[aiaiaiai-org/infra#91](https://github.com/aiaiaiai-org/infra/pull/91).
-[infra#90](https://github.com/aiaiaiai-org/infra/pull/90) is superseded.
+```sh
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked
+bash scripts/smoke.sh
+```
+
+`.github/workflows/publish.yml` publishes `ghcr.io/aiaiaiai-org/4x-ais:<commit>`
+from public `master` and attests it. While the repository is private it stops
+before the push. `auth.aiaiaiai.org` routes to the `4x-ais` workload on
+edge-prod-2 (`aiaiaiai-org/infra`); it is not deployed.
 
 Licensed under Apache-2.0 (`LICENSE`, `NOTICE`).
