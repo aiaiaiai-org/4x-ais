@@ -23,6 +23,7 @@ const ISSUER: &str = "https://auth.aiaiaiai.org";
 const HOST_NAME: &str = "auth.aiaiaiai.org";
 const ONE_CALLBACK: &str = "https://nilx.one/api/v1/auth/aiaiaiai/callback";
 const PRISM_CALLBACK: &str = "https://prism.aiaiaiai.org/auth/callback";
+const OPEN_CALLBACK: &str = "https://open.example/auth/callback";
 const SECRET: &str = "a-client-secret-of-thirty-two-bytes!";
 const PASSWORD: &str = "correct horse battery";
 const VERIFIER: &str = "a-pkce-verifier-that-is-long-enough-for-rfc-7636";
@@ -40,6 +41,8 @@ async fn app() -> Router {
           "secret_sha256": hex_sha256(SECRET), "pub_dress": true },
         { "client_id": "prism", "name": "Prism", "skin": "slug", "redirect_uris": [PRISM_CALLBACK],
           "secret_sha256": hex_sha256(SECRET) },
+        // A public client: no secret, only PKCE.
+        { "client_id": "open-app", "name": "Open", "skin": "slug", "redirect_uris": [OPEN_CALLBACK] },
     ])
     .to_string();
     let config = Config::from_lookup(move |key| {
@@ -195,26 +198,30 @@ impl Flow {
     }
 
     async fn exchange(&self, app: &Router, code: &str) -> Reply {
-        let body = url::form_urlencoded::Serializer::new(String::new())
-            .extend_pairs([
-                ("grant_type", "authorization_code"),
-                ("code", code),
-                ("redirect_uri", self.callback),
-                ("code_verifier", VERIFIER),
-            ])
-            .finish();
-        let request = Request::post("/token")
-            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-            .header(
+        let mut pairs = vec![
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("redirect_uri", self.callback),
+            ("code_verifier", VERIFIER),
+        ];
+        let mut request = Request::post("/token")
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+        if self.client_id == "open-app" {
+            // A public client names itself and sends no secret.
+            pairs.push(("client_id", self.client_id));
+        } else {
+            request = request.header(
                 header::AUTHORIZATION,
                 format!(
                     "Basic {}",
                     STANDARD.encode(format!("{}:{SECRET}", self.client_id))
                 ),
-            )
-            .body(Body::from(body))
-            .unwrap();
-        send(app, request).await
+            );
+        }
+        let body = url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs(pairs)
+            .finish();
+        send(app, request.body(Body::from(body)).unwrap()).await
     }
 
     /// Exchanges the code and verifies the token with the 0x1 client's code.
@@ -667,6 +674,113 @@ async fn the_token_endpoint_spends_a_code_on_its_first_exchange() {
     let reused = flow.exchange(&app, &code).await;
     assert_eq!(reused.status, StatusCode::BAD_REQUEST);
     assert!(reused.body.contains("invalid_grant"));
+}
+
+#[tokio::test]
+async fn a_public_client_proves_its_code_with_pkce_and_no_secret() {
+    let app = app().await;
+    let flow = open(&app, "open-app", OPEN_CALLBACK, None).await;
+    let page = flow
+        .post(&app, &[("step", "identify"), ("slug", "wanderer")])
+        .await;
+    let assignment = hidden(&page.body, "assignment");
+    let reply = flow
+        .post(
+            &app,
+            &[
+                ("step", "register"),
+                ("assignment", &assignment),
+                ("password", PASSWORD),
+                ("password_confirm", PASSWORD),
+            ],
+        )
+        .await;
+    let code = query(&location(&reply.headers), "code").unwrap();
+    let token = |basic: Option<&str>, extra: &[(&str, &str)]| {
+        let mut pairs = vec![
+            ("grant_type", "authorization_code"),
+            ("code", code.as_str()),
+            ("redirect_uri", OPEN_CALLBACK),
+        ];
+        if !extra.iter().any(|(name, _)| *name == "code_verifier") {
+            pairs.push(("code_verifier", VERIFIER));
+        }
+        pairs.extend_from_slice(extra);
+        let mut request = Request::post("/token")
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+        if let Some(basic) = basic {
+            request = request.header(
+                header::AUTHORIZATION,
+                format!("Basic {}", STANDARD.encode(basic)),
+            );
+        }
+        let body = url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs(pairs)
+            .finish();
+        request.body(Body::from(body)).unwrap()
+    };
+    // None of these is a client the endpoint knows: each is refused before the
+    // code is touched, so the code is still good afterwards.
+    for refused in [
+        // a public client that presents a secret, in either place
+        token(Some(&format!("open-app:{SECRET}")), &[]),
+        token(
+            None,
+            &[("client_id", "open-app"), ("client_secret", SECRET)],
+        ),
+        // no client at all
+        token(None, &[]),
+        // an unknown client
+        token(None, &[("client_id", "nobody")]),
+    ] {
+        assert_eq!(send(&app, refused).await.status, StatusCode::UNAUTHORIZED);
+    }
+    // A confidential client may not drop its secret to look public.
+    let impostor = Request::post("/token")
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .body(Body::from(format!(
+            "grant_type=authorization_code&code={code}&redirect_uri={ONE_CALLBACK}&code_verifier={VERIFIER}&client_id=nilx-one"
+        )))
+        .unwrap();
+    assert_eq!(send(&app, impostor).await.status, StatusCode::UNAUTHORIZED);
+
+    // A wrong verifier spends the code and issues nothing.
+    let wrong = format!("{VERIFIER}x");
+    let forged = send(
+        &app,
+        token(
+            None,
+            &[("client_id", "open-app"), ("code_verifier", &wrong)],
+        ),
+    )
+    .await;
+    assert_eq!(forged.status, StatusCode::BAD_REQUEST, "{}", forged.body);
+    assert!(forged.body.contains("invalid_grant"));
+
+    // The right verifier on a fresh code is accepted, and Core's own verifier
+    // accepts the token.
+    let flow = open(&app, "open-app", OPEN_CALLBACK, None).await;
+    let page = flow
+        .post(&app, &[("step", "identify"), ("slug", "wanderer")])
+        .await;
+    let signed = flow
+        .post(
+            &app,
+            &[
+                ("step", "sign_in"),
+                ("pub_dress", &hidden(&page.body, "pub_dress")),
+                ("password", PASSWORD),
+            ],
+        )
+        .await;
+    let verified = flow
+        .verified(&app, &signed)
+        .await
+        .expect("Core accepts the token");
+    assert_eq!(
+        verified.pub_dress, None,
+        "the client did not ask for the address"
+    );
 }
 
 #[tokio::test]

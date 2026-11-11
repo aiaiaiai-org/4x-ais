@@ -41,7 +41,6 @@ makes every stored password unusable.
     "name": "0x1",
     "skin": "cell",
     "redirect_uris": ["https://nilx.one/api/v1/auth/aiaiaiai/callback"],
-    "secret_sha256": "<lowercase hex SHA-256 of the client secret>",
     "pub_dress": true
   }
 ]
@@ -50,8 +49,14 @@ makes every stored password unusable.
 - **`skin`** is presentation only. `cell` shows the whole prefix `0x0`–`0xf` as
   one choice; `slug` shows the name alone, and AIS assigns the prefix.
 - **`pub_dress`** allows the client to ask for the address in the token.
-- **The client secret** stays with the client. For 0x1 it is
-  `AIAIAIAI_SIGN_IN_CLIENT_SECRET` on its host. AIS keeps only the digest.
+- **`secret_sha256`** is optional. A client that has none is a **public
+  client**: it holds no secret and names itself with `client_id` at `/token`.
+  What binds its code to it is PKCE (S256, required of every client) and the
+  exact redirect URI: a stolen code is useless without the verifier, which
+  never leaves the client's own transaction. The 0x1 host is registered this
+  way, so no secret is generated, stored or carried for it. A client that
+  does hold a secret (lowercase hex SHA-256 of it; AIS never keeps the secret)
+  must present it, and a public client that presents one is refused.
 - **Redirect URIs** must match exactly and be https.
 
 ## What the service does not do yet
