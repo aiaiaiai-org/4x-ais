@@ -18,9 +18,12 @@ refuses to start when a setting is missing or unsafe.
   no repository, image or log sees them.
 - **Infra only carries and runs.** `aiaiaiai-org/infra` owns access to the
   servers; it never generates, stores or edits a value.
-- **A value that is there is never replaced.** A rerun, as on every deploy,
-  changes none of the three. A present but malformed one stops the deploy
-  instead of being rotated, because a new value is damage, not a fix (below).
+- **They are generated once and never replaced.** The script generates only
+  when the runtime file does not exist, and only while the data volume does
+  not either. A rerun, as on every deploy, changes none of the three. If the
+  file exists but one of them is missing, empty or malformed, or the file is
+  gone while the volume survives, the deploy stops instead of minting a new
+  value, because a new value is damage, not a fix (below).
 
 ## Settings
 
@@ -37,8 +40,10 @@ refuses to start when a setting is missing or unsafe.
 `AIS_SECRET` and `AIS_PASSWORD_PEPPER` are independent values. They are
 generated once and kept: a new `AIS_SECRET` changes every client's `sub`, a new
 `AIS_PASSWORD_PEPPER` makes every stored password unusable, and a new
-`AIS_SIGNING_KEY` invalidates every token in flight. Losing the host's file
-loses them, so it is backed up with the database.
+`AIS_SIGNING_KEY` invalidates every token in flight. **Nothing backs the file
+up.** After the first deploy the owner copies it off the host once; it never
+changes afterwards, so one copy is enough. Without it a lost file means a new
+set of secrets and a service whose every identifier has changed.
 
 ## Clients
 
