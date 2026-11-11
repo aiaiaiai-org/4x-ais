@@ -6,7 +6,7 @@
 The aiaiaiai auth identity service: the one sign-in page every product sends
 people to, at `auth.aiaiaiai.org`. Scope and decisions are in
 [docs/service-design.md](docs/service-design.md); configuration and the
-secret envelope are in [docs/runtime.md](docs/runtime.md).
+host-owned secrets are in [docs/runtime.md](docs/runtime.md).
 
 A Rust service (axum, SQLite). It owns people, their `pub_dress` and native
 password, and the OpenID Connect issuer (code + PKCE, pairwise `sub`, EdDSA

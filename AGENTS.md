@@ -258,7 +258,7 @@ for merge and deploy. If blocked, report the exact state reached.
 
 `4x-ais` is the aiaiaiai auth identity service. Product scope and open
 questions are in `docs/service-design.md`; configuration and the secret
-envelope are in `docs/runtime.md`. The service is Rust (`src/`).
+host-owned secrets are in `docs/runtime.md`. The service is Rust (`src/`).
 
 - Branches are `feat/*`, `fix/*`, and `docs/*`. Do not use `claude/*` names.
 - `.github/workflows/publish.yml` publishes the service image from public
