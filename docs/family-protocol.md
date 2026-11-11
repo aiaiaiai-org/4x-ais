@@ -176,6 +176,94 @@ The ticket is the general case. The 0x1 **visit** (`nilx-one/core`
 knows them, opens the visit and hands Market a one-time code. Both end in the
 same order shape.
 
+## Asking about a person
+
+A product often needs to know who a person is somewhere else: "is this
+Telegram account someone in aiaiaiai, do they play 0x1, how many seeds do they
+have". The answer comes in two hops, each from the owner of the fact:
+
+1. **AIS answers who the person is.** It does not answer anything about a game.
+2. **The product that owns the fact answers about it.** 0x1 says whether this
+   is a player and what is in the wallet. Market says what its catalog has.
+
+A product asks only with **proof the person is present right now**, and gets
+only the claims the registry lets that pair see. A bare Telegram id never opens
+anything. Otherwise any product could ask "is Telegram 123 a person, a player,
+how rich" about everybody, and the question alone would be an oracle.
+
+### Market first (Telegram, a Mini App or the bot)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor P as Person in Telegram
+    participant M as 0xda-market
+    participant A as AIS
+    participant X as 0x1
+
+    P->>M: opens the Market Mini App
+    M->>A: POST /family/resolve · evidence: Telegram initData (signed)
+    A->>A: verify Telegram's signature and freshness · find the provider binding
+    A-->>M: unknown | { sub: Market's pairwise sub, ticket for aud=nilx-one }
+    M->>X: POST /family/claims · ticket · want: player, wallet.balance, subscription
+    X-->>M: { player: true, wallet: { seeds: "12400", as_of }, subscription: { tier, until } }
+```
+
+- **The evidence** is Telegram's signed `initData` (Mini App) or a Telegram
+  login payload, not an id. AIS verifies it through Telegram's third-party
+  validation (Telegram's Ed25519 signature over `initData`), so AIS never holds
+  Market's bot token. Valid for minutes, not hours.
+- **`unknown`** means no aiaiaiai identity is bound to this Telegram account.
+  Market may then send the person to sign in or create one at AIS. AIS never
+  says whether the account is bound to something it is not allowed to name.
+- **`/family/claims` returns only the claims listed for this pair** in the
+  registry (`family.claims`, below). `player: false` is a full answer and
+  carries nothing else.
+- **The wallet is read, never handed over.** `wallet.balance` is a snapshot
+  with `as_of`, for drawing the price list. Seeds are spent only by an order
+  that 0x1 pulls and commits itself ([commerce](#commerce-one-order-any-issuer)).
+  No claim and no token lets Market spend.
+
+Exists in part: Market already orders in Telegram, and 0x1 checks the
+ordering Telegram account is still bound to the paying Bond
+(`SpendAuthorization::ProviderLink` in `nilx-one/core`). What is new is asking
+*before* the order, through AIS, instead of trusting a `pub_dress` the order
+carries.
+
+### 0x1 first (`0xda-market.nilx.one/zoloti`)
+
+A player in 0x1 goes to Market from the game:
+
+1. 0x1 opens a visit (exists: `market_visit`) and asks AIS for a ticket the
+   other way, `aud=0xda-market`, so Market learns its own `sub` for this person.
+2. The one-time handoff code carries the ticket, the context (Market point,
+   issuer `0x1`, the page to return to) and the claims 0x1 grants Market for
+   this visit (the same `wallet.balance` snapshot, the subscription status).
+3. Market answers with its catalog for that context: categories, SKUs, prices
+   in seeds. 0x1 never asks Market for prices in advance; they are Market's facts.
+4. A purchase is an order like any other, with the visit as the recipient. The
+   return to the game is confirmed by the issuer's receipt, not by the
+   navigation (exists: `market_return_confirmed`).
+
+### Claims in `family.v1`
+
+| Claim                  | Owner  | Answer                                          | Fresh for     |
+| ---------------------- | ------ | ----------------------------------------------- | ------------- |
+| `identity`             | AIS    | the asker's pairwise `sub`, `pub_dress` if allowed | the session |
+| `player`               | 0x1    | `true` / `false`                                | a day         |
+| `wallet.balance`       | 0x1    | `{ denomination, amount, as_of }`               | a minute      |
+| `subscription`         | 0x1    | Core's `subscription_status` result              | its `valid_until_ms` |
+| `catalog`              | Market | categories and SKUs for a context               | Market's cache |
+
+The registry names who may ask what:
+
+```json
+"family": { "claims": { "nilx-one": ["player", "wallet.balance", "subscription"] } }
+```
+
+on Market's entry means Market may ask 0x1 for those three. Nothing listed,
+nothing answered.
+
 ## Commerce: one order, any issuer
 
 Market's order is the shared object for every purchase in the family. The
@@ -305,13 +393,14 @@ To build, each its own pull request, in this order:
 
 1. **AIS**: the `family` member of the registry, `client_credentials` with
    `private_key_jwt`, and the product JWKS lookup.
-2. **AIS**: the subject ticket endpoint.
+2. **AIS**: the subject ticket and `/family/resolve` with Telegram evidence.
 3. **AIS**: the event outbox and signed delivery (already in the first-release
    scope as `identity.*`).
-4. **0xda-market**: sign-in through AIS; tickets on orders; issuer API accepts
+4. **0xda-market**: sign-in through AIS; resolve Telegram people through AIS
+   before an order; tickets on orders; issuer API accepts
    AIS tokens next to the HMAC.
-5. **0x1** (`nilx-one/core`): accept a ticket as the recipient; call Market with
-   AIS tokens; emit `wallet.*`, `entitlement.*`, `subscription.changed`.
+5. **0x1** (`nilx-one/core`): `/family/claims`; tickets in the visit handoff;
+   accept a ticket as the recipient; call Market with AIS tokens; emit `wallet.*`, `entitlement.*`, `subscription.changed`.
 6. **Prism Hub**: an events endpoint and a Porter route for `commerce.*` and
    `entitlement.*` to Telegram.
 7. **infra**: registry entries and product keys in host-owned secrets; then the
