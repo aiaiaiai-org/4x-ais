@@ -154,7 +154,7 @@ async fn discovery(State(state): State<AppState>) -> Response {
         "grant_types_supported": ["authorization_code"],
         "subject_types_supported": ["pairwise"],
         "id_token_signing_alg_values_supported": ["EdDSA"],
-        "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
+        "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post", "none"],
         "code_challenge_methods_supported": ["S256"],
         "scopes_supported": ["openid", "pub_dress"],
         "claims_supported": ["iss", "sub", "aud", "exp", "iat", "auth_time", "nonce", "amr", "pub_dress"],
@@ -988,13 +988,23 @@ fn authenticate_client(state: &AppState, headers: &HeaderMap, form: &TokenForm) 
             Some((form_decode(id), form_decode(secret)))
         });
     let (client_id, secret) = match (basic, &form.client_id, &form.client_secret) {
-        (Some(pair), None, None) => pair,
-        (None, Some(id), Some(secret)) => (id.clone(), secret.clone()),
+        (Some((id, secret)), None, None) => (id, Some(secret)),
+        (None, Some(id), Some(secret)) => (id.clone(), Some(secret.clone())),
+        // A public client names itself and sends no secret.
+        (None, Some(id), None) => (id.clone(), None),
         _ => return None,
     };
     let client = state.config.clients.get(&client_id)?;
-    let supplied: [u8; 32] = Sha256::digest(secret.as_bytes()).into();
-    bool::from(supplied.ct_eq(&client.secret_sha256)).then(|| client.clone())
+    match (client.secret_sha256, secret) {
+        (Some(expected), Some(secret)) => {
+            let supplied: [u8; 32] = Sha256::digest(secret.as_bytes()).into();
+            bool::from(supplied.ct_eq(&expected)).then(|| client.clone())
+        }
+        (None, None) => Some(client.clone()),
+        // A public client that presents a secret, or a confidential one that
+        // presents none, is misconfigured or an impostor; neither is let in.
+        _ => None,
+    }
 }
 
 /// RFC 6749 §2.3.1: Basic credentials are form-encoded first.

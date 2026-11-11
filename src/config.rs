@@ -49,8 +49,10 @@ struct ClientRecord {
     skin: Skin,
     redirect_uris: Vec<String>,
     /// Lowercase hex SHA-256 of the client secret. The secret itself never
-    /// reaches AIS configuration.
-    secret_sha256: String,
+    /// reaches AIS configuration. Absent for a public client: one that holds
+    /// no secret and proves a code only with its PKCE verifier.
+    #[serde(default)]
+    secret_sha256: Option<String>,
     #[serde(default)]
     pub_dress: bool,
 }
@@ -62,7 +64,9 @@ pub struct Client {
     pub name: String,
     pub skin: Skin,
     pub redirect_uris: Vec<String>,
-    pub secret_sha256: [u8; 32],
+    /// `None` for a public client. PKCE (S256, always required) and the exact
+    /// redirect URI are what bind a code to it.
+    pub secret_sha256: Option<[u8; 32]>,
     pub pub_dress_scope: bool,
 }
 
@@ -201,8 +205,14 @@ impl TryFrom<ClientRecord> for Client {
                 return Err(format!("{id}: redirect URIs must be normalized https URLs"));
             }
         }
-        let secret_sha256 = decode_hex32(&record.secret_sha256)
-            .ok_or_else(|| format!("{id}: secret_sha256 must be 64 lowercase hex digits"))?;
+        let secret_sha256 = record
+            .secret_sha256
+            .as_deref()
+            .map(|value| {
+                decode_hex32(value)
+                    .ok_or_else(|| format!("{id}: secret_sha256 must be 64 lowercase hex digits"))
+            })
+            .transpose()?;
         Ok(Self {
             client_id: record.client_id,
             name: record.name,
@@ -260,6 +270,18 @@ mod tests {
         assert_eq!(config.issuer_host(), "auth.aiaiaiai.org");
         assert_eq!(config.clients["nilx-one"].skin, Skin::Cell);
         assert_eq!(config.bind.port(), 1927);
+    }
+
+    #[test]
+    fn a_client_may_hold_no_secret_but_not_a_malformed_one() {
+        let public = r#"[{"client_id":"open-app","name":"Open","skin":"slug","redirect_uris":["https://open.example/cb"]}]"#;
+        let config = Config::from_lookup(lookup(&[("AIS_CLIENTS", public)])).unwrap();
+        assert_eq!(config.clients["open-app"].secret_sha256, None);
+        let malformed = r#"[{"client_id":"open-app","name":"Open","skin":"slug","redirect_uris":["https://open.example/cb"],"secret_sha256":"not-hex"}]"#;
+        assert!(matches!(
+            Config::from_lookup(lookup(&[("AIS_CLIENTS", malformed)])).err(),
+            Some(ConfigError::Clients(_))
+        ));
     }
 
     #[test]
