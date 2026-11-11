@@ -21,6 +21,11 @@
 #
 # The registered clients are public configuration and live here, so adding a
 # product is a reviewed edit of this file.
+#
+# The runtime file is rewritten whole on every run, from the three kept secrets
+# and the fixed settings below. Any other key someone adds to it by hand (an
+# AIS_BIND, say) is dropped on the next deploy: a setting belongs in this file's
+# source, where it is reviewed, not in the host's copy.
 set -eu
 
 runtime_env="${1:?runtime environment path is required}"

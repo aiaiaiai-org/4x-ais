@@ -18,6 +18,10 @@ refuses to start when a setting is missing or unsafe.
   no repository, image or log sees them.
 - **Infra only carries and runs.** `aiaiaiai-org/infra` owns access to the
   servers; it never generates, stores or edits a value.
+- **The runtime file is rewritten whole on every deploy** from the three kept
+  secrets and the settings in the script. A key added to the host's copy by
+  hand is dropped on the next deploy: a setting belongs in the script, where it
+  is reviewed.
 - **They are generated once and never replaced.** The script generates only
   when the runtime file does not exist, and only while the data volume does
   not either. A rerun, as on every deploy, changes none of the three. If the
