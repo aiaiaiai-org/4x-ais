@@ -15,4 +15,6 @@ pub mod store;
 pub use issuer::router;
 
 #[cfg(test)]
+mod host_env_tests;
+#[cfg(test)]
 mod tests;

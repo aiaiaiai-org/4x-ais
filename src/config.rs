@@ -1,8 +1,9 @@
 // © 2026 aiaiaiai · aiaiaiai.org
 // SPDX-License-Identifier: Apache-2.0
 
-//! Runtime configuration. Every secret arrives in the environment from the
-//! producer's envelope; infra only carries it (docs/runtime.md).
+//! Runtime configuration. Every setting arrives in the environment, and the
+//! host generates the secrets once (`deploy/prepare-runtime-env.sh`); infra only
+//! runs that script (docs/runtime.md).
 
 use std::collections::HashMap;
 
