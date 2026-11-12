@@ -73,10 +73,10 @@ struct PendingCode {
 }
 
 #[derive(Clone)]
-struct AppState {
-    config: Arc<Config>,
-    keys: Keys,
-    store: Store,
+pub(crate) struct AppState {
+    pub(crate) config: Arc<Config>,
+    pub(crate) keys: Keys,
+    pub(crate) store: Store,
     passwords: PasswordEngine,
     limiter: Limiter,
     dummy_hash: Arc<str>,
@@ -107,10 +107,11 @@ pub fn router(config: Config, store: Store) -> Router {
         .route("/.well-known/jwks.json", get(jwks))
         .route("/authorize", get(authorize).post(submit))
         .route("/token", post(token))
+        .route("/family/pass", post(crate::pass::issue))
         .with_state(state)
 }
 
-fn now() -> u64 {
+pub(crate) fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs())
@@ -838,6 +839,17 @@ async fn complete(ctx: &Ctx<'_>, identity: &Identity) -> Response {
     let Some(code) = random_token(32) else {
         return redirect_error(&request.redirect_uri, "server_error", &request.state);
     };
+    // Kept before the code exists, so every subject a client can hold is one
+    // AIS can find the person by again.
+    if let Err(error) = ctx
+        .state
+        .store
+        .remember_subject(&request.client_id, &subject, &identity.subject)
+        .await
+    {
+        tracing::error!(%error, "remembering an issued subject failed");
+        return redirect_error(&request.redirect_uri, "server_error", &request.state);
+    }
     {
         let mut codes = ctx.state.codes.lock().expect("code store lock poisoned");
         codes.retain(|_, pending| pending.expires_at > ctx.now);
@@ -1141,11 +1153,11 @@ fn form_decode(value: &str) -> String {
         .unwrap_or_default()
 }
 
-fn token_error(status: StatusCode, error: &'static str) -> Response {
+pub(crate) fn token_error(status: StatusCode, error: &'static str) -> Response {
     no_store(status, serde_json::json!({ "error": error }))
 }
 
-fn no_store(status: StatusCode, value: serde_json::Value) -> Response {
+pub(crate) fn no_store(status: StatusCode, value: serde_json::Value) -> Response {
     let mut response = (status, Json(value)).into_response();
     response
         .headers_mut()

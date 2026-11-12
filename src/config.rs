@@ -207,6 +207,9 @@ fn parse_clients(value: &str) -> Result<HashMap<String, Client>, ConfigError> {
             continue;
         };
         for audience in product.tokens.keys() {
+            if audience == crate::product_token::AIS_AUDIENCE {
+                continue;
+            }
             if audience == &client.client_id
                 || clients
                     .get(audience)
@@ -239,6 +242,9 @@ impl TryFrom<ClientRecord> for Client {
                 .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
         {
             return Err(format!("invalid client_id {id:?}"));
+        }
+        if id == crate::product_token::AIS_AUDIENCE {
+            return Err(format!("{id:?} names AIS itself and is not a client id"));
         }
         if record.name.trim().is_empty() || record.name.len() > 64 {
             return Err(format!("{id}: name must be 1-64 bytes"));
@@ -457,6 +463,15 @@ mod tests {
                 "{product}"
             );
         }
+        // AIS itself is an audience a product may hold a token for, never a client.
+        assert!(
+            err(entry(
+                serde_json::json!({ "keys": key, "tokens": { "ais": ["pass.issue"] } })
+            ))
+            .is_none()
+        );
+        let named_ais = serde_json::json!([{ "client_id": "ais", "name": "AIS", "skin": "slug", "redirect_uris": ["https://c.example/cb"] }]);
+        assert!(matches!(err(named_ais), Some(ConfigError::Clients(_))));
         // Without a product entry, a client still needs a redirect URI.
         let no_redirect = serde_json::json!([{ "client_id": "c", "name": "C", "skin": "slug", "redirect_uris": [] }]);
         assert!(matches!(err(no_redirect), Some(ConfigError::Clients(_))));

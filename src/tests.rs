@@ -30,6 +30,7 @@ const VERIFIER: &str = "a-pkce-verifier-that-is-long-enough-for-rfc-7636";
 
 const MARKET_KEY: [u8; 32] = [11; 32];
 const HUB_KEY: [u8; 32] = [12; 32];
+const ONE_KEY: [u8; 32] = [13; 32];
 
 fn public_key(seed: [u8; 32]) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
@@ -49,7 +50,8 @@ fn hex_sha256(value: &str) -> String {
 async fn app() -> Router {
     let clients = serde_json::json!([
         { "client_id": "nilx-one", "name": "0x1", "skin": "cell", "redirect_uris": [ONE_CALLBACK],
-          "secret_sha256": hex_sha256(SECRET), "pub_dress": true },
+          "secret_sha256": hex_sha256(SECRET), "pub_dress": true,
+          "product": { "keys": [{ "kid": "o1", "x": public_key(ONE_KEY) }] } },
         { "client_id": "prism", "name": "Prism", "skin": "slug", "redirect_uris": [PRISM_CALLBACK],
           "secret_sha256": hex_sha256(SECRET) },
         // A public client: no secret, only PKCE.
@@ -60,7 +62,7 @@ async fn app() -> Router {
                        "tokens": { "prism-hub": ["hub.call", "hub.events"] } } },
         { "client_id": "prism-hub", "name": "Prism Hub", "skin": "slug", "redirect_uris": [],
           "product": { "keys": [{ "kid": "h1", "x": public_key(HUB_KEY) }],
-                       "tokens": { "0xda-market": ["hub.relay"] }, "relay": true } },
+                       "tokens": { "0xda-market": ["hub.relay"], "ais": ["pass.issue"] }, "relay": true } },
     ])
     .to_string();
     let config = Config::from_lookup(move |key| {
@@ -1063,4 +1065,162 @@ async fn the_hub_acts_for_a_product_it_relays() {
     )
     .await;
     assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+}
+
+// ---------------------------------------------------------------------------
+// Person passes (hub.v1)
+// ---------------------------------------------------------------------------
+
+/// The hub's token for asking AIS for a pass on behalf of `actor`.
+async fn hub_pass_token(app: &Router, actor: &str, jti: &str) -> String {
+    let assertion = product_assertion(HUB_KEY, "h1", "prism-hub", jti);
+    let reply = ask_product_token(
+        app,
+        &[
+            ("client_assertion", &assertion),
+            ("audience", "ais"),
+            ("actor", actor),
+        ],
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let body: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
+    body["access_token"].as_str().unwrap().to_owned()
+}
+
+async fn ask_pass(app: &Router, token: &str, body: serde_json::Value) -> Reply {
+    send(
+        app,
+        Request::post("/family/pass")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap(),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn a_pass_names_the_person_to_another_product_and_back() {
+    let app = app().await;
+    let (flow, reply) = register_cell(&app, "f", "passholder").await;
+    let one_sub = flow.verified(&app, &reply).await.expect("verified").subject;
+
+    // 0x1 names the person by its own subject; the pass is for the market.
+    let token = hub_pass_token(&app, "nilx-one", "hub-pass-token-0001").await;
+    let reply = ask_pass(
+        &app,
+        &token,
+        serde_json::json!({ "subject": one_sub, "audience": "0xda-market", "purpose": "order:o-42" }),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_eq!(reply.headers[header::CACHE_CONTROL], "no-store");
+    let body: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
+    assert_eq!(body["expires_in"], 900);
+    let (header, claims) = token_claims(body["pass"].as_str().unwrap());
+    assert_eq!(header["typ"], "pass+jwt");
+    assert_eq!(claims["iss"], ISSUER);
+    assert_eq!(claims["aud"], "0xda-market");
+    assert_eq!(claims["azp"], "nilx-one");
+    assert_eq!(claims["purpose"], "order:o-42");
+    let market_sub = claims["sub"].as_str().unwrap().to_owned();
+    assert_ne!(
+        market_sub, one_sub,
+        "each product knows the person by its own subject"
+    );
+
+    // The market can now name the same person back to 0x1, by its own subject.
+    let token = hub_pass_token(&app, "0xda-market", "hub-pass-token-0002").await;
+    let reply = ask_pass(
+        &app,
+        &token,
+        serde_json::json!({ "subject": market_sub, "audience": "nilx-one", "purpose": "claims" }),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let body: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
+    let (_, claims) = token_claims(body["pass"].as_str().unwrap());
+    assert_eq!(claims["sub"], one_sub);
+}
+
+#[tokio::test]
+async fn a_pass_is_refused_outside_its_rules() {
+    let app = app().await;
+    let (flow, reply) = register_cell(&app, "f", "passrules").await;
+    let one_sub = flow.verified(&app, &reply).await.expect("verified").subject;
+    let token = hub_pass_token(&app, "nilx-one", "hub-pass-token-0003").await;
+    let request = |audience: &str, purpose: &str, subject: &str| serde_json::json!({ "subject": subject, "audience": audience, "purpose": purpose });
+
+    // A subject AIS never gave this product.
+    let reply = ask_pass(
+        &app,
+        &token,
+        request("0xda-market", "claims", &"a".repeat(43)),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::NOT_FOUND);
+    assert!(reply.body.contains("unknown_subject"));
+    // The 0x1 subject is not the market's: the same subject named by the
+    // market is unknown.
+    let market_token = hub_pass_token(&app, "0xda-market", "hub-pass-token-0004").await;
+    let reply = ask_pass(&app, &market_token, request("nilx-one", "claims", &one_sub)).await;
+    assert_eq!(reply.status, StatusCode::NOT_FOUND);
+    // A pass to the asker itself, to a client that is not a product, or for
+    // a purpose outside the protocol.
+    for body in [
+        request("nilx-one", "claims", &one_sub),
+        request("open-app", "claims", &one_sub),
+        request("0xda-market", "anything", &one_sub),
+        request("0xda-market", "claims", "short"),
+    ] {
+        let reply = ask_pass(&app, &token, body.clone()).await;
+        assert_eq!(reply.status, StatusCode::BAD_REQUEST, "{body}");
+    }
+
+    // Only the relay's AIS token, with an actor, opens this door.
+    let no_actor = {
+        let assertion = product_assertion(HUB_KEY, "h1", "prism-hub", "hub-pass-token-0005");
+        let reply = ask_product_token(
+            &app,
+            &[("client_assertion", &assertion), ("audience", "ais")],
+        )
+        .await;
+        let body: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
+        body["access_token"].as_str().unwrap().to_owned()
+    };
+    let other_audience = {
+        let assertion = product_assertion(HUB_KEY, "h1", "prism-hub", "hub-pass-token-0006");
+        let reply = ask_product_token(
+            &app,
+            &[
+                ("client_assertion", &assertion),
+                ("audience", "0xda-market"),
+                ("actor", "nilx-one"),
+            ],
+        )
+        .await;
+        let body: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
+        body["access_token"].as_str().unwrap().to_owned()
+    };
+    let mut tampered = token.clone();
+    tampered.pop();
+    tampered.push(if token.ends_with('A') { 'B' } else { 'A' });
+    for bad in [
+        no_actor.as_str(),
+        other_audience.as_str(),
+        tampered.as_str(),
+        "not-a-token",
+    ] {
+        let reply = ask_pass(&app, bad, request("0xda-market", "claims", &one_sub)).await;
+        assert_eq!(reply.status, StatusCode::UNAUTHORIZED, "{bad}");
+    }
+    // A product that is not a relay cannot get a token for AIS at all.
+    let assertion = product_assertion(MARKET_KEY, "m1", "0xda-market", "market-pass-token-01");
+    let reply = ask_product_token(
+        &app,
+        &[("client_assertion", &assertion), ("audience", "ais")],
+    )
+    .await;
+    assert!(reply.body.contains("invalid_target"));
 }

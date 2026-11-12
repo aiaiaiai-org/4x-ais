@@ -66,12 +66,20 @@ On top of sign-in ([service design](service-design.md)) it adds:
    `aud` the audience, `scope`, `exp` 5 minutes, signed with the key AIS
    publishes in its JWKS. A relay (Prism Hub) may add `actor`, which becomes
    `act.sub`. No shared secrets: a secret is refused on this grant.
-2. **Person passes.** A short JWT that says "for this one operation, this
-   person is product B's `sub` X", with `aud` B, `azp` the asker, a `purpose`,
-   `exp` 15 minutes and a single-use `jti`. Only the hub may ask for one, on
-   behalf of a product whose grant allows it; the pass goes back to that
-   product, which keeps it with its order. The asker names the person by its
-   own pairwise `sub` or by fresh provider evidence. No consent screen: confirming the
+2. **Person passes** (built, by the asker's own `sub`). A short JWT that
+   says "for this one operation, this person is product B's `sub` X":
+   `typ` `pass+jwt`, `aud` B, `sub` B's pairwise subject, `azp` the asker, a
+   `purpose` (`claims` or `order:<id>`), `exp` 15 minutes, a `jti`. Only a
+   relay (Prism Hub) asks, at `POST /family/pass`, with an AIS product token
+   for the audience `ais` holding `pass.issue` and naming the asking product
+   as `actor`. The body is `{subject, audience, purpose}`: the asker names the
+   person by its own pairwise `sub`, and AIS answers only for a person it gave
+   the asker that subject (`unknown_subject` otherwise). To find the person
+   again, AIS keeps `issued_subjects`: client id, pairwise `sub`, person;
+   nothing else. It fills it at every sign-in and for every pass it issues, so
+   B can later name the person back by the `sub` the pass gave it. The pass
+   goes back to the asker, which keeps it with its order. Naming the person by
+   fresh provider evidence comes with provider bindings. No consent screen: confirming the
    purchase is consent (owner decision, 2026-11-11).
 3. **Resolve.** Given fresh signed provider evidence (Telegram `initData` or a
    Telegram login payload, never a bare id), answer `unknown` or the asker's
