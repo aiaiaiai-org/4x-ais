@@ -10,24 +10,22 @@
 use axum::{
     Json,
     extract::State,
-    http::{HeaderMap, StatusCode, header::AUTHORIZATION},
+    http::{HeaderMap, StatusCode},
     response::Response,
 };
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use ed25519_dalek::Signature;
 use serde::Deserialize;
 
 use crate::{
     crypto::{random_token, sign_jwt_typed},
+    family::subject_ok,
     issuer::{AppState, no_store, now, token_error},
-    product_token::AIS_AUDIENCE,
+    relay::caller,
 };
 
 /// How long a pass is good for: the life of an order's authorization.
 pub const PASS_TTL: u64 = 15 * 60;
 /// The scope a relay's token must hold to ask for a pass.
 pub const PASS_SCOPE: &str = "pass.issue";
-const MAX_TOKEN_BYTES: usize = 4096;
 const MAX_ORDER_ID_BYTES: usize = 128;
 
 #[derive(Debug, Deserialize)]
@@ -39,94 +37,6 @@ pub struct PassRequest {
     audience: String,
     /// `claims`, or `order:<order id>`.
     purpose: String,
-}
-
-/// Who is asking: the relay that presented the token and the product it acts
-/// for.
-#[derive(Debug, Eq, PartialEq)]
-struct Caller {
-    relay: String,
-    asker: String,
-}
-
-#[derive(Deserialize)]
-struct TokenHeader {
-    alg: String,
-    typ: String,
-    kid: String,
-}
-
-#[derive(Deserialize)]
-struct Act {
-    sub: String,
-}
-
-#[derive(Deserialize)]
-struct TokenClaims {
-    iss: String,
-    sub: String,
-    aud: String,
-    exp: u64,
-    scope: String,
-    #[serde(default)]
-    act: Option<Act>,
-}
-
-fn decode<T: for<'a> Deserialize<'a>>(part: &str) -> Option<T> {
-    serde_json::from_slice(&URL_SAFE_NO_PAD.decode(part).ok()?).ok()
-}
-
-/// A product token AIS itself issued for `AIS_AUDIENCE`, to a relay acting
-/// for another registered product.
-fn caller(state: &AppState, headers: &HeaderMap, now: u64) -> Option<Caller> {
-    let token = headers
-        .get(AUTHORIZATION)?
-        .to_str()
-        .ok()?
-        .strip_prefix("Bearer ")?;
-    if token.len() > MAX_TOKEN_BYTES {
-        return None;
-    }
-    let mut parts = token.split('.');
-    let (Some(header), Some(payload), Some(signature), None) =
-        (parts.next(), parts.next(), parts.next(), parts.next())
-    else {
-        return None;
-    };
-    let header: TokenHeader = decode(header)?;
-    if header.alg != "EdDSA" || header.typ != "at+jwt" || header.kid != state.config.key_id {
-        return None;
-    }
-    let signature = Signature::from_slice(&URL_SAFE_NO_PAD.decode(signature).ok()?).ok()?;
-    let signed = &token[..token.rfind('.')?];
-    state
-        .config
-        .signing_key
-        .verifying_key()
-        .verify_strict(signed.as_bytes(), &signature)
-        .ok()?;
-    let claims: TokenClaims = decode(payload)?;
-    if claims.iss != state.config.issuer_id()
-        || claims.aud != AIS_AUDIENCE
-        || claims.exp <= now
-        || !claims.scope.split(' ').any(|scope| scope == PASS_SCOPE)
-    {
-        return None;
-    }
-    // Only a relay asks, and only for a registered product other than itself.
-    let relay = state.config.clients.get(&claims.sub)?;
-    if !relay.product.as_ref().is_some_and(|product| product.relay) {
-        return None;
-    }
-    let asker = claims.act?.sub;
-    let asking = state.config.clients.get(&asker)?;
-    if asking.product.is_none() || asker == claims.sub {
-        return None;
-    }
-    Some(Caller {
-        relay: claims.sub,
-        asker,
-    })
 }
 
 fn purpose_ok(purpose: &str) -> bool {
@@ -142,14 +52,6 @@ fn purpose_ok(purpose: &str) -> bool {
     })
 }
 
-fn subject_ok(subject: &str) -> bool {
-    // A pairwise subject is 32 bytes, unpadded base64url.
-    subject.len() == 43
-        && subject
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-}
-
 /// `POST /family/pass`.
 pub(crate) async fn issue(
     State(state): State<AppState>,
@@ -157,7 +59,7 @@ pub(crate) async fn issue(
     Json(request): Json<PassRequest>,
 ) -> Response {
     let now = now();
-    let Some(caller) = caller(&state, &headers, now) else {
+    let Some(caller) = caller(&state, &headers, now, PASS_SCOPE) else {
         return token_error(StatusCode::UNAUTHORIZED, "invalid_token");
     };
     let audience_is_product = state

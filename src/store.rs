@@ -49,6 +49,19 @@ CREATE TABLE IF NOT EXISTS issued_subjects (
     subject BLOB NOT NULL CHECK (length(subject) = 32),
     PRIMARY KEY (client_id, sub)
 ) STRICT;
+
+-- The family link (hub.v1): which account a person holds in a product, as
+-- that product reported it. For 0x1 the account is the Bond. Nothing about
+-- the account itself is kept: no balance, no state.
+CREATE TABLE IF NOT EXISTS family_links (
+    subject BLOB NOT NULL CHECK (length(subject) = 32),
+    product TEXT NOT NULL,
+    account TEXT NOT NULL,
+    label TEXT NOT NULL,
+    as_of INTEGER NOT NULL CHECK (as_of >= 0),
+    PRIMARY KEY (subject, product),
+    UNIQUE (product, account)
+) STRICT;
 ";
 
 #[derive(Debug, thiserror::Error)]
@@ -73,6 +86,24 @@ pub enum Registration {
     Taken,
     /// The address cannot be represented as a public label.
     Unrepresentable,
+}
+
+/// What a product's report of a link did.
+#[derive(Debug, Eq, PartialEq)]
+pub enum LinkReport {
+    Stored,
+    /// AIS already holds a report as new or newer: a replay, ignored.
+    Stale,
+    /// That account is already linked to another person.
+    AccountTaken,
+}
+
+/// A person's account in one product, as last reported.
+#[derive(Debug, Eq, PartialEq)]
+pub struct FamilyLink {
+    pub account: String,
+    pub label: String,
+    pub as_of: u64,
 }
 
 #[derive(Clone)]
@@ -239,6 +270,60 @@ impl Store {
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.and_then(|bytes| <[u8; 32]>::try_from(bytes).ok()))
+    }
+
+    /// Records the account a person holds in `product`, unless AIS already
+    /// holds a report at least as new.
+    pub async fn put_link(
+        &self,
+        subject: &[u8; 32],
+        product: &str,
+        account: &str,
+        label: &str,
+        as_of: u64,
+    ) -> Result<LinkReport, StoreError> {
+        let result = sqlx::query(
+            "INSERT INTO family_links (subject, product, account, label, as_of) VALUES (?, ?, ?, ?, ?) \
+             ON CONFLICT (subject, product) DO UPDATE SET \
+             account = excluded.account, label = excluded.label, as_of = excluded.as_of \
+             WHERE excluded.as_of > family_links.as_of",
+        )
+        .bind(subject.as_slice())
+        .bind(product)
+        .bind(account)
+        .bind(label)
+        .bind(i64::try_from(as_of).unwrap_or(i64::MAX))
+        .execute(&self.pool)
+        .await;
+        match result {
+            Ok(done) if done.rows_affected() == 0 => Ok(LinkReport::Stale),
+            Ok(_) => Ok(LinkReport::Stored),
+            // The (product, account) constraint: one account, one person.
+            Err(sqlx::Error::Database(error)) if error.is_unique_violation() => {
+                Ok(LinkReport::AccountTaken)
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// The account a person holds in `product`, if it was reported.
+    pub async fn link_for(
+        &self,
+        subject: &[u8; 32],
+        product: &str,
+    ) -> Result<Option<FamilyLink>, StoreError> {
+        let row = sqlx::query(
+            "SELECT account, label, as_of FROM family_links WHERE subject = ? AND product = ?",
+        )
+        .bind(subject.as_slice())
+        .bind(product)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| FamilyLink {
+            account: row.get("account"),
+            label: row.get("label"),
+            as_of: u64::try_from(row.get::<i64, _>("as_of")).unwrap_or_default(),
+        }))
     }
 
     /// Records a product assertion as spent. `false` when it already was.

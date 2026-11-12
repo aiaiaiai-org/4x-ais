@@ -81,9 +81,22 @@ On top of sign-in ([service design](service-design.md)) it adds:
    goes back to the asker, which keeps it with its order. Naming the person by
    fresh provider evidence comes with provider bindings. No consent screen: confirming the
    purchase is consent (owner decision, 2026-11-11).
-3. **Resolve.** Given fresh signed provider evidence (Telegram `initData` or a
-   Telegram login payload, never a bare id), answer `unknown` or the asker's
-   pairwise `sub` and, when asked, a pass. AIS never says more than that.
+3. **The family link** (built, by the asker's own `sub`; owner decision 8 in
+   the hub protocol). AIS keeps which account a person holds in each product
+   (`family_links`: person, product, account, its `pub_dress`, `as_of`), and
+   nothing about the account itself. Seeds and every other account fact stay
+   with the product (decision 9).
+   - `POST /family/accounts` (`accounts.put`, scope `accounts.put`): a product
+     reports `{subject, account, pub_dress, as_of}` for a person it names by
+     its own `sub`. The account always belongs to the reporting product. A
+     report older than the one AIS holds is answered `stale` and changes
+     nothing; an account already linked to another person is `account_taken`.
+   - `POST /family/link` (`people.link`, scope `link.read`): a product asks
+     `{subject, product}` and gets `{sub, accounts: {<product>: {account,
+     pub_dress, as_of}}}`, or `unknown`. The answer names the account, never
+     the other product's pairwise subject. For 0x1 the account is the Bond.
+   Naming the person by fresh Telegram evidence instead of a `sub` comes with
+   Telegram bindings.
 4. **Subject translation for events.** The hub asks AIS to turn one product's
    `sub` into another's when it fans an event out; the answer is used once and
    not stored by the hub.
