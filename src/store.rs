@@ -29,6 +29,15 @@ CREATE TABLE IF NOT EXISTS identities (
     password_hash TEXT NOT NULL,
     created_at INTEGER NOT NULL CHECK (created_at >= 0)
 ) STRICT;
+
+-- Product assertions already spent, kept until they would have expired, so a
+-- signed assertion buys exactly one token.
+CREATE TABLE IF NOT EXISTS spent_assertions (
+    client_id TEXT NOT NULL,
+    jti TEXT NOT NULL,
+    expires_at INTEGER NOT NULL CHECK (expires_at >= 0),
+    PRIMARY KEY (client_id, jti)
+) STRICT;
 ";
 
 #[derive(Debug, thiserror::Error)]
@@ -183,6 +192,34 @@ impl Store {
             Err(sqlx::Error::Database(error)) if error.is_unique_violation() => {
                 Ok(Registration::Taken)
             }
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// Records a product assertion as spent. `false` when it already was.
+    pub async fn spend_assertion(
+        &self,
+        client_id: &str,
+        jti: &str,
+        expires_at: u64,
+        now: u64,
+    ) -> Result<bool, StoreError> {
+        let to_i64 = |value: u64| i64::try_from(value).unwrap_or(i64::MAX);
+        sqlx::query("DELETE FROM spent_assertions WHERE expires_at <= ?")
+            .bind(to_i64(now))
+            .execute(&self.pool)
+            .await?;
+        let result = sqlx::query(
+            "INSERT INTO spent_assertions (client_id, jti, expires_at) VALUES (?, ?, ?)",
+        )
+        .bind(client_id)
+        .bind(jti)
+        .bind(to_i64(expires_at))
+        .execute(&self.pool)
+        .await;
+        match result {
+            Ok(_) => Ok(true),
+            Err(sqlx::Error::Database(error)) if error.is_unique_violation() => Ok(false),
             Err(error) => Err(error.into()),
         }
     }

@@ -34,10 +34,11 @@ use url::Url;
 
 use crate::{
     config::{Client, Config, Skin},
-    crypto::{Keys, random_token, sign_jwt},
+    crypto::{Keys, random_token, sign_jwt, sign_jwt_typed},
     limiter::Limiter,
     page::{self, Language, Message, Step, View},
     password::{PasswordEngine, PolicyError},
+    product_token::{self, ASSERTION_TYPE, GrantError, TOKEN_TTL},
     store::{DISCRIMINATORS, Identity, Registration, Store},
 };
 
@@ -151,10 +152,11 @@ async fn discovery(State(state): State<AppState>) -> Response {
         "token_endpoint": format!("{issuer}/token"),
         "jwks_uri": format!("{issuer}/.well-known/jwks.json"),
         "response_types_supported": ["code"],
-        "grant_types_supported": ["authorization_code"],
+        "grant_types_supported": ["authorization_code", "client_credentials"],
         "subject_types_supported": ["pairwise"],
         "id_token_signing_alg_values_supported": ["EdDSA"],
-        "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post", "none"],
+        "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post", "none", "private_key_jwt"],
+        "token_endpoint_auth_signing_alg_values_supported": ["EdDSA"],
         "code_challenge_methods_supported": ["S256"],
         "scopes_supported": ["openid", "pub_dress"],
         "claims_supported": ["iss", "sub", "aud", "exp", "iat", "auth_time", "nonce", "amr", "pub_dress"],
@@ -895,6 +897,11 @@ struct TokenForm {
     code_verifier: Option<String>,
     client_id: Option<String>,
     client_secret: Option<String>,
+    client_assertion_type: Option<String>,
+    client_assertion: Option<String>,
+    audience: Option<String>,
+    scope: Option<String>,
+    actor: Option<String>,
 }
 
 async fn token(
@@ -903,6 +910,9 @@ async fn token(
     Form(form): Form<TokenForm>,
 ) -> Response {
     let now = now();
+    if form.grant_type.as_deref() == Some("client_credentials") {
+        return product_token(&state, &form, now).await;
+    }
     let Some(client) = authenticate_client(&state, &headers, &form) else {
         let mut response = token_error(StatusCode::UNAUTHORIZED, "invalid_client");
         response.headers_mut().insert(
@@ -972,6 +982,122 @@ async fn token(
             "token_type": "Bearer",
             "expires_in": ID_TOKEN_TTL,
             "id_token": id_token,
+        }),
+    )
+}
+
+fn invalid_client() -> Response {
+    token_error(StatusCode::UNAUTHORIZED, "invalid_client")
+}
+
+/// `client_credentials` with `private_key_jwt`: a family product's token for
+/// one audience (docs/hub-protocol.md). A secret is never accepted here.
+async fn product_token(state: &AppState, form: &TokenForm, now: u64) -> Response {
+    if form.client_secret.is_some() || form.client_assertion_type.as_deref() != Some(ASSERTION_TYPE)
+    {
+        return invalid_client();
+    }
+    let (Some(assertion), Some(audience)) =
+        (form.client_assertion.as_deref(), form.audience.as_deref())
+    else {
+        return token_error(StatusCode::BAD_REQUEST, "invalid_request");
+    };
+    let Some(client_id) = product_token::claimed_client(assertion) else {
+        return invalid_client();
+    };
+    if form
+        .client_id
+        .as_ref()
+        .is_some_and(|named| named != &client_id)
+    {
+        return invalid_client();
+    }
+    let Some((client, product)) = state
+        .config
+        .clients
+        .get(&client_id)
+        .and_then(|client| Some((client, client.product.as_ref()?)))
+    else {
+        return invalid_client();
+    };
+    let issuer = state.config.issuer_id();
+    let endpoint = format!("{issuer}/token");
+    let verified = match product_token::verify_assertion(
+        assertion,
+        &client.client_id,
+        product,
+        &[issuer, endpoint.as_str()],
+        now,
+    ) {
+        Ok(verified) => verified,
+        Err(error) => {
+            tracing::info!(client = %client.client_id, ?error, "product assertion refused");
+            return invalid_client();
+        }
+    };
+    let scopes = match product_token::grant_scopes(product, audience, form.scope.as_deref()) {
+        Ok(scopes) => scopes,
+        Err(GrantError::Target) => return token_error(StatusCode::BAD_REQUEST, "invalid_target"),
+        Err(GrantError::Scope) => return token_error(StatusCode::BAD_REQUEST, "invalid_scope"),
+    };
+    // Only a relay names the product it acts for, and only a registered one.
+    if let Some(actor) = form.actor.as_deref() {
+        let known = state
+            .config
+            .clients
+            .get(actor)
+            .is_some_and(|actor| actor.product.is_some());
+        if !product.relay || !known || actor == client.client_id {
+            return token_error(StatusCode::BAD_REQUEST, "invalid_request");
+        }
+    }
+    // Spent only once everything else held, so a refused request does not
+    // burn an assertion the product may correct and resend.
+    match state
+        .store
+        .spend_assertion(&verified.client_id, &verified.jti, verified.expires_at, now)
+        .await
+    {
+        Ok(true) => {}
+        Ok(false) => {
+            tracing::info!(client = %client.client_id, "product assertion replayed");
+            return invalid_client();
+        }
+        Err(error) => {
+            tracing::error!(%error, "spending a product assertion failed");
+            return token_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable");
+        }
+    }
+    let Some(jti) = random_token(16) else {
+        return token_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable");
+    };
+    let scope = scopes.into_iter().collect::<Vec<_>>().join(" ");
+    let mut claims = serde_json::json!({
+        "iss": issuer,
+        "sub": client.client_id,
+        "client_id": client.client_id,
+        "aud": audience,
+        "scope": scope,
+        "iat": now,
+        "exp": now + TOKEN_TTL,
+        "jti": jti,
+    });
+    if let Some(actor) = form.actor.as_deref() {
+        claims["act"] = serde_json::json!({ "sub": actor });
+    }
+    let access_token = sign_jwt_typed(
+        &state.config.signing_key,
+        &state.config.key_id,
+        "at+jwt",
+        &claims,
+    );
+    no_store(
+        StatusCode::OK,
+        serde_json::json!({
+            "access_token": access_token,
+            "token_type": "Bearer",
+            "expires_in": TOKEN_TTL,
+            "scope": scope,
         }),
     )
 }

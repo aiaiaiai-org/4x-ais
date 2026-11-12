@@ -84,7 +84,18 @@ pub fn random_token(bytes: usize) -> Option<String> {
 
 /// A compact EdDSA JWS.
 pub fn sign_jwt(key: &SigningKey, key_id: &str, claims: &serde_json::Value) -> String {
-    let header = serde_json::json!({ "alg": "EdDSA", "typ": "JWT", "kid": key_id });
+    sign_jwt_typed(key, key_id, "JWT", claims)
+}
+
+/// A compact EdDSA JWS with an explicit `typ`, such as `at+jwt` (RFC 9068),
+/// so a product token can never be mistaken for an `id_token`.
+pub fn sign_jwt_typed(
+    key: &SigningKey,
+    key_id: &str,
+    typ: &str,
+    claims: &serde_json::Value,
+) -> String {
+    let header = serde_json::json!({ "alg": "EdDSA", "typ": typ, "kid": key_id });
     let signed = format!(
         "{}.{}",
         URL_SAFE_NO_PAD.encode(header.to_string()),

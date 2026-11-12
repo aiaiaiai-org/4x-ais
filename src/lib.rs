@@ -10,6 +10,7 @@ pub mod issuer;
 pub mod limiter;
 pub mod page;
 pub mod password;
+pub mod product_token;
 pub mod store;
 
 pub use issuer::router;
