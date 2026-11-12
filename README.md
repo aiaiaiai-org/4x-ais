@@ -13,12 +13,12 @@ registered product clients. **AIS means _aiaiaiai Identity Service_, not
 
 | Entry point | Purpose |
 | --- | --- |
-| `https://auth.aiaiaiai.org` | Shared identity sign-in and registration |
+| `https://auth.aiaiaiai.org/` | General AIS sign-in, without a product context (target behavior) |
 | `/authorize?client_id=nilx-one` | 0x1-specific client context |
 | `/authorize?client_id=0xda-market` | 0xda-market-specific client context |
 | `/authorize?client_id=prism-hub` | Prism Hub context **only if** it needs an interactive user sign-in |
 
-These are **illustrative client identifiers and entry points**, not a claim
+The root route must not implicitly select any product. Until the general AIS\nsign-in page is available, the currently specified temporary behavior for\n`GET /` is **HTTP 301** redirecting to `https://aiaiaiai.org/`. This\nredirect is not the final sign-in UX; because 301 may be cached, reassess\nits permanence before rollout. The redirect is a stated requirement, not\na live HTTP verification or evidence of deployment.\n\nThese are **illustrative client identifiers and entry points**, not a claim
 that all three clients are registered or enabled in the current runtime.
 The client registry determines which `client_id` values are valid and which
 presentation skin applies. A product-specific presentation does **not**
