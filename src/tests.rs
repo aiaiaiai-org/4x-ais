@@ -62,7 +62,7 @@ async fn app() -> Router {
                        "tokens": { "prism-hub": ["hub.call", "hub.events"] } } },
         { "client_id": "prism-hub", "name": "Prism Hub", "skin": "slug", "redirect_uris": [],
           "product": { "keys": [{ "kid": "h1", "x": public_key(HUB_KEY) }],
-                       "tokens": { "0xda-market": ["hub.relay"], "ais": ["pass.issue"] }, "relay": true } },
+                       "tokens": { "0xda-market": ["hub.relay"], "ais": ["pass.issue", "accounts.put", "link.read"] }, "relay": true } },
     ])
     .to_string();
     let config = Config::from_lookup(move |key| {
@@ -1223,4 +1223,206 @@ async fn a_pass_is_refused_outside_its_rules() {
     )
     .await;
     assert!(reply.body.contains("invalid_target"));
+}
+
+// ---------------------------------------------------------------------------
+// The family link (hub.v1)
+// ---------------------------------------------------------------------------
+
+async fn hub_token_with_scope(app: &Router, actor: &str, jti: &str, scope: &str) -> String {
+    let assertion = product_assertion(HUB_KEY, "h1", "prism-hub", jti);
+    let reply = ask_product_token(
+        app,
+        &[
+            ("client_assertion", &assertion),
+            ("audience", "ais"),
+            ("actor", actor),
+            ("scope", scope),
+        ],
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let body: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
+    body["access_token"].as_str().unwrap().to_owned()
+}
+
+async fn post_json(app: &Router, path: &str, token: &str, body: serde_json::Value) -> Reply {
+    send(
+        app,
+        Request::post(path)
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap(),
+    )
+    .await
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+
+/// A person signed into 0x1, and the subject the market knows them by.
+async fn person_in_both(app: &Router, slug: &str, n: u32) -> (String, String) {
+    let (flow, reply) = register_cell(app, "f", slug).await;
+    let one_sub = flow.verified(app, &reply).await.expect("verified").subject;
+    let token = hub_pass_token(app, "nilx-one", &format!("hub-link-pass-{n:08}")).await;
+    let reply = ask_pass(
+        app,
+        &token,
+        serde_json::json!({ "subject": one_sub, "audience": "0xda-market", "purpose": "claims" }),
+    )
+    .await;
+    let body: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
+    let (_, claims) = token_claims(body["pass"].as_str().unwrap());
+    (one_sub, claims["sub"].as_str().unwrap().to_owned())
+}
+
+#[tokio::test]
+async fn ais_tells_the_market_which_bond_a_person_is() {
+    let app = app().await;
+    let (one_sub, market_sub) = person_in_both(&app, "linkholder", 1).await;
+    let now = unix_now();
+
+    // 0x1 reports its Bond for the person, by its own subject.
+    let one = hub_token_with_scope(&app, "nilx-one", "hub-link-tok-00001", "accounts.put").await;
+    let report = |account: &str, pub_dress: &str, as_of: u64| serde_json::json!({ "subject": one_sub, "account": account, "pub_dress": pub_dress, "as_of": as_of });
+    let reply = post_json(
+        &app,
+        "/family/accounts",
+        &one,
+        report("bond-7f3a", "0xflinkholder", now - 10),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert!(reply.body.contains("stored"));
+
+    // The market asks once, by its own subject, and learns the Bond.
+    let market = hub_token_with_scope(&app, "0xda-market", "hub-link-tok-00002", "link.read").await;
+    let ask = serde_json::json!({ "subject": market_sub, "product": "nilx-one" });
+    let reply = post_json(&app, "/family/link", &market, ask.clone()).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let body: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
+    assert_eq!(body["sub"], market_sub);
+    assert_eq!(body["accounts"]["nilx-one"]["account"], "bond-7f3a");
+    assert_eq!(body["accounts"]["nilx-one"]["pub_dress"], "0xflinkholder");
+    assert!(!reply.body.contains(&one_sub), "never 0x1's own subject");
+
+    // A replay of an older report changes nothing; a newer one (a rename) does.
+    let reply = post_json(
+        &app,
+        "/family/accounts",
+        &one,
+        report("bond-7f3a", "0xfold", now - 20),
+    )
+    .await;
+    assert!(reply.body.contains("stale"), "{}", reply.body);
+    let reply = post_json(
+        &app,
+        "/family/accounts",
+        &one,
+        report("bond-7f3a", "0x0renamed", now),
+    )
+    .await;
+    assert!(reply.body.contains("stored"), "{}", reply.body);
+    let reply = post_json(&app, "/family/link", &market, ask).await;
+    let body: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
+    assert_eq!(body["accounts"]["nilx-one"]["pub_dress"], "0x0renamed");
+}
+
+#[tokio::test]
+async fn a_link_is_written_only_by_its_product_and_read_only_with_the_scope() {
+    let app = app().await;
+    let (one_sub, market_sub) = person_in_both(&app, "linkrules", 2).await;
+    let (other_sub, _) = person_in_both(&app, "linkother", 3).await;
+    let now = unix_now();
+    let one = hub_token_with_scope(&app, "nilx-one", "hub-link-tok-00003", "accounts.put").await;
+    let report = |subject: &str, account: &str| serde_json::json!({ "subject": subject, "account": account, "pub_dress": "0xflinkrules", "as_of": now });
+    assert_eq!(
+        post_json(&app, "/family/accounts", &one, report(&one_sub, "bond-1"))
+            .await
+            .status,
+        StatusCode::OK
+    );
+
+    // One Bond, one person.
+    let reply = post_json(&app, "/family/accounts", &one, report(&other_sub, "bond-1")).await;
+    assert_eq!(reply.status, StatusCode::CONFLICT, "{}", reply.body);
+
+    // The market cannot write a 0x1 link: what it reports is its own account,
+    // and the person it names must be one AIS gave it.
+    let market_writes =
+        hub_token_with_scope(&app, "0xda-market", "hub-link-tok-00004", "accounts.put").await;
+    let reply = post_json(
+        &app,
+        "/family/accounts",
+        &market_writes,
+        report(&one_sub, "bond-2"),
+    )
+    .await;
+    assert_eq!(
+        reply.status,
+        StatusCode::NOT_FOUND,
+        "0x1's subject is unknown to the market"
+    );
+
+    // Malformed reports.
+    for bad in [
+        serde_json::json!({ "subject": one_sub, "account": "bond 1", "pub_dress": "0xflinkrules", "as_of": now }),
+        serde_json::json!({ "subject": one_sub, "account": "bond-1", "pub_dress": "not-an-address", "as_of": now }),
+        serde_json::json!({ "subject": one_sub, "account": "bond-1", "pub_dress": "0xflinkrules", "as_of": now + 3600 }),
+        serde_json::json!({ "subject": "short", "account": "bond-1", "pub_dress": "0xflinkrules", "as_of": now }),
+    ] {
+        let reply = post_json(&app, "/family/accounts", &one, bad.clone()).await;
+        assert_eq!(reply.status, StatusCode::BAD_REQUEST, "{bad}");
+    }
+
+    // Reading needs link.read; writing needs accounts.put.
+    let reply = post_json(
+        &app,
+        "/family/link",
+        &market_writes,
+        serde_json::json!({ "subject": market_sub, "product": "nilx-one" }),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
+    let market = hub_token_with_scope(&app, "0xda-market", "hub-link-tok-00005", "link.read").await;
+    let reply = post_json(
+        &app,
+        "/family/accounts",
+        &market,
+        report(&market_sub, "bond-3"),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
+
+    // Unknown answers, and a question about the asker itself.
+    let ask = |subject: &str, product: &str| serde_json::json!({ "subject": subject, "product": product });
+    let reply = post_json(
+        &app,
+        "/family/link",
+        &market,
+        ask(&"a".repeat(43), "nilx-one"),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::NOT_FOUND);
+    let reply = post_json(&app, "/family/link", &market, ask(&market_sub, "prism-hub")).await;
+    assert_eq!(
+        reply.status,
+        StatusCode::NOT_FOUND,
+        "no prism-hub account was reported"
+    );
+    let reply = post_json(
+        &app,
+        "/family/link",
+        &market,
+        ask(&market_sub, "0xda-market"),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+    let reply = post_json(&app, "/family/link", &market, ask(&market_sub, "open-app")).await;
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST, "not a product");
 }

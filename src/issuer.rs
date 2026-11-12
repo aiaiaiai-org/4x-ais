@@ -108,6 +108,8 @@ pub fn router(config: Config, store: Store) -> Router {
         .route("/authorize", get(authorize).post(submit))
         .route("/token", post(token))
         .route("/family/pass", post(crate::pass::issue))
+        .route("/family/accounts", post(crate::family::put))
+        .route("/family/link", post(crate::family::link))
         .with_state(state)
 }
 
