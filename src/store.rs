@@ -38,6 +38,17 @@ CREATE TABLE IF NOT EXISTS spent_assertions (
     expires_at INTEGER NOT NULL CHECK (expires_at >= 0),
     PRIMARY KEY (client_id, jti)
 ) STRICT;
+
+-- Which pairwise subject AIS gave which client for which person. A pairwise
+-- subject is a one-way digest, so this is how AIS finds the person again when
+-- a product names them by its own subject (a person pass, hub.v1). Nothing
+-- else is kept: no address, no time, no product state.
+CREATE TABLE IF NOT EXISTS issued_subjects (
+    client_id TEXT NOT NULL,
+    sub TEXT NOT NULL,
+    subject BLOB NOT NULL CHECK (length(subject) = 32),
+    PRIMARY KEY (client_id, sub)
+) STRICT;
 ";
 
 #[derive(Debug, thiserror::Error)]
@@ -194,6 +205,40 @@ impl Store {
             }
             Err(error) => Err(error.into()),
         }
+    }
+
+    /// Remembers the pairwise subject a client was given for a person.
+    pub async fn remember_subject(
+        &self,
+        client_id: &str,
+        sub: &str,
+        subject: &[u8; 32],
+    ) -> Result<(), StoreError> {
+        sqlx::query(
+            "INSERT OR IGNORE INTO issued_subjects (client_id, sub, subject) VALUES (?, ?, ?)",
+        )
+        .bind(client_id)
+        .bind(sub)
+        .bind(subject.as_slice())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// The person a client knows by `sub`, if AIS gave it that subject.
+    pub async fn subject_for(
+        &self,
+        client_id: &str,
+        sub: &str,
+    ) -> Result<Option<[u8; 32]>, StoreError> {
+        let row: Option<Vec<u8>> = sqlx::query_scalar(
+            "SELECT subject FROM issued_subjects WHERE client_id = ? AND sub = ?",
+        )
+        .bind(client_id)
+        .bind(sub)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.and_then(|bytes| <[u8; 32]>::try_from(bytes).ok()))
     }
 
     /// Records a product assertion as spent. `false` when it already was.

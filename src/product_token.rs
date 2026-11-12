@@ -12,6 +12,9 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use ed25519_dalek::{Signature, VerifyingKey};
 use serde::Deserialize;
 
+/// The audience a product names to get a token for AIS itself, such as the
+/// one Prism Hub presents to ask for a person pass. Never a client id.
+pub const AIS_AUDIENCE: &str = "ais";
 pub const ASSERTION_TYPE: &str = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
 /// The longest an assertion may live, and how long a product token lives.
 pub const TOKEN_TTL: u64 = 5 * 60;

@@ -93,7 +93,9 @@ set of secrets and a service whose every identifier has changed.
   names the other registered products it may get a token for, and the scopes
   it may hold for each; nothing listed, nothing granted. `relay` (Prism Hub
   only) lets it name, as `actor`, the product whose request it carries; the
-  token then holds `act.sub`.
+  token then holds `act.sub`. The audience `ais` is AIS itself: a relay with
+  `"ais": ["pass.issue"]` may ask `POST /family/pass` for person passes. No
+  client may be named `ais`.
 - **The registry lives in `deploy/prepare-runtime-env.sh`.** The clients are
   public configuration, so adding a product is a reviewed edit of that file.
   The test `host_env_tests.rs` runs the script and feeds what it writes to this
@@ -106,7 +108,7 @@ set of secrets and a service whose every identifier has changed.
 - an issuer session across products: every product sign-in asks for the
   password, which a password manager fills;
 - the change-event outbox;
-- person passes, `resolve`, subject translation and `identity.providers`
-  (`hub.v1`).
+- `resolve` by provider evidence, subject translation for events and
+  `identity.providers` (`hub.v1`).
 
 Each comes as its own change.
