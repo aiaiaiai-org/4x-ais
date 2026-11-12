@@ -5,13 +5,15 @@
 //! host generates the secrets once (`deploy/prepare-runtime-env.sh`); infra only
 //! runs that script (docs/runtime.md).
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use ed25519_dalek::SigningKey;
+use ed25519_dalek::{SigningKey, VerifyingKey};
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
 use url::Url;
+
+use crate::product_token::Product;
 
 const MIN_SECRET_BYTES: usize = 32;
 
@@ -56,7 +58,31 @@ struct ClientRecord {
     secret_sha256: Option<String>,
     #[serde(default)]
     pub_dress: bool,
+    /// Present for a family product that may ask for product tokens.
+    #[serde(default)]
+    product: Option<ProductRecord>,
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProductRecord {
+    keys: Vec<ProductKeyRecord>,
+    /// Audience (another client id) → the scopes the product may hold for it.
+    #[serde(default)]
+    tokens: HashMap<String, Vec<String>>,
+    #[serde(default)]
+    relay: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProductKeyRecord {
+    kid: String,
+    /// The Ed25519 public key, base64url, 32 bytes.
+    x: String,
+}
+
+const MAX_PRODUCT_KEYS: usize = 4;
 
 /// A server-registered client. `name` and `skin` change presentation only.
 #[derive(Clone, Debug)]
@@ -69,6 +95,8 @@ pub struct Client {
     /// redirect URI are what bind a code to it.
     pub secret_sha256: Option<[u8; 32]>,
     pub pub_dress_scope: bool,
+    /// `Some` for a family product: its keys and token grants.
+    pub product: Option<Product>,
 }
 
 #[derive(Clone)]
@@ -173,6 +201,24 @@ fn parse_clients(value: &str) -> Result<HashMap<String, Client>, ConfigError> {
             return Err(ConfigError::Clients("duplicate client_id".into()));
         }
     }
+    // A product may ask for tokens only to other registered products.
+    for client in clients.values() {
+        let Some(product) = &client.product else {
+            continue;
+        };
+        for audience in product.tokens.keys() {
+            if audience == &client.client_id
+                || clients
+                    .get(audience)
+                    .is_none_or(|target| target.product.is_none())
+            {
+                return Err(ConfigError::Clients(format!(
+                    "{}: token audience {audience:?} is not another registered product",
+                    client.client_id
+                )));
+            }
+        }
+    }
     if clients.is_empty() {
         return Err(ConfigError::Clients(
             "at least one client is required".into(),
@@ -197,7 +243,8 @@ impl TryFrom<ClientRecord> for Client {
         if record.name.trim().is_empty() || record.name.len() > 64 {
             return Err(format!("{id}: name must be 1-64 bytes"));
         }
-        if record.redirect_uris.is_empty() {
+        // A product that only speaks to other products signs nobody in.
+        if record.redirect_uris.is_empty() && record.product.is_none() {
             return Err(format!("{id}: at least one redirect URI is required"));
         }
         for uri in &record.redirect_uris {
@@ -214,6 +261,10 @@ impl TryFrom<ClientRecord> for Client {
                     .ok_or_else(|| format!("{id}: secret_sha256 must be 64 lowercase hex digits"))
             })
             .transpose()?;
+        let product = record
+            .product
+            .map(|product| parse_product(id, product))
+            .transpose()?;
         Ok(Self {
             client_id: record.client_id,
             name: record.name,
@@ -221,8 +272,63 @@ impl TryFrom<ClientRecord> for Client {
             redirect_uris: record.redirect_uris,
             secret_sha256,
             pub_dress_scope: record.pub_dress,
+            product,
         })
     }
+}
+
+fn is_token_word(value: &str, extra: &[u8]) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || extra.contains(&byte))
+}
+
+fn parse_product(id: &str, record: ProductRecord) -> Result<Product, String> {
+    if record.keys.is_empty() || record.keys.len() > MAX_PRODUCT_KEYS {
+        return Err(format!("{id}: a product holds 1-{MAX_PRODUCT_KEYS} keys"));
+    }
+    let mut keys = HashMap::new();
+    for key in record.keys {
+        if key.kid.is_empty()
+            || key.kid.len() > 64
+            || !key
+                .kid
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        {
+            return Err(format!("{id}: invalid key id {:?}", key.kid));
+        }
+        let public = URL_SAFE_NO_PAD
+            .decode(key.x.trim())
+            .ok()
+            .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
+            .and_then(|bytes| VerifyingKey::from_bytes(&bytes).ok())
+            .filter(|public| !public.is_weak())
+            .ok_or_else(|| format!("{id}: key {:?} is not an Ed25519 public key", key.kid))?;
+        if keys.insert(key.kid.clone(), public).is_some() {
+            return Err(format!("{id}: duplicate key id {:?}", key.kid));
+        }
+    }
+    let mut tokens = HashMap::new();
+    for (audience, scopes) in record.tokens {
+        if scopes.is_empty() {
+            return Err(format!("{id}: no scopes for audience {audience:?}"));
+        }
+        let mut set = BTreeSet::new();
+        for scope in scopes {
+            if !is_token_word(&scope, b"._:-") || !set.insert(scope.clone()) {
+                return Err(format!("{id}: invalid or repeated scope {scope:?}"));
+            }
+        }
+        tokens.insert(audience, set);
+    }
+    Ok(Product {
+        keys,
+        tokens,
+        relay: record.relay,
+    })
 }
 
 fn decode_hex32(value: &str) -> Option<[u8; 32]> {
@@ -283,6 +389,77 @@ mod tests {
             Config::from_lookup(lookup(&[("AIS_CLIENTS", malformed)])).err(),
             Some(ConfigError::Clients(_))
         ));
+    }
+
+    fn product_key(seed: u8) -> String {
+        URL_SAFE_NO_PAD.encode(
+            SigningKey::from_bytes(&[seed; 32])
+                .verifying_key()
+                .as_bytes(),
+        )
+    }
+
+    #[test]
+    fn a_product_holds_keys_and_grants_for_other_products() {
+        let clients = serde_json::json!([
+            { "client_id": "0xda-market", "name": "0xda-market", "skin": "cell",
+              "redirect_uris": ["https://0xda-market.nilx.one/cb"],
+              "product": { "keys": [{ "kid": "m1", "x": product_key(1) }],
+                           "tokens": { "prism-hub": ["hub.call"] } } },
+            { "client_id": "prism-hub", "name": "Prism Hub", "skin": "slug", "redirect_uris": [],
+              "product": { "keys": [{ "kid": "h1", "x": product_key(2) }],
+                           "tokens": { "0xda-market": ["hub.relay"] }, "relay": true } },
+        ])
+        .to_string();
+        let config = Config::from_lookup(lookup(&[("AIS_CLIENTS", &clients)])).unwrap();
+        let market = config.clients["0xda-market"].product.as_ref().unwrap();
+        assert!(market.keys.contains_key("m1"));
+        assert!(market.tokens["prism-hub"].contains("hub.call"));
+        assert!(!market.relay);
+        assert!(config.clients["prism-hub"].product.as_ref().unwrap().relay);
+        assert!(config.clients["prism-hub"].redirect_uris.is_empty());
+    }
+
+    #[test]
+    fn a_product_registry_entry_is_checked_whole() {
+        let err = |clients: serde_json::Value| {
+            Config::from_lookup(lookup(&[("AIS_CLIENTS", &clients.to_string())])).err()
+        };
+        let entry = |product: serde_json::Value| {
+            serde_json::json!([
+                { "client_id": "a", "name": "A", "skin": "slug", "redirect_uris": [], "product": product },
+                { "client_id": "b", "name": "B", "skin": "slug", "redirect_uris": [],
+                  "product": { "keys": [{ "kid": "b1", "x": product_key(3) }] } },
+                { "client_id": "c", "name": "C", "skin": "slug", "redirect_uris": ["https://c.example/cb"] },
+            ])
+        };
+        let key = serde_json::json!([{ "kid": "a1", "x": product_key(4) }]);
+        assert!(
+            err(entry(
+                serde_json::json!({ "keys": key, "tokens": { "b": ["x"] } })
+            ))
+            .is_none()
+        );
+        for product in [
+            serde_json::json!({ "keys": [] }),
+            serde_json::json!({ "keys": [{ "kid": "a1", "x": "short" }] }),
+            serde_json::json!({ "keys": [{ "kid": "a 1", "x": product_key(4) }] }),
+            serde_json::json!({ "keys": [{ "kid": "a1", "x": product_key(4) }, { "kid": "a1", "x": product_key(5) }] }),
+            serde_json::json!({ "keys": key, "tokens": { "a": ["x"] } }),
+            serde_json::json!({ "keys": key, "tokens": { "c": ["x"] } }),
+            serde_json::json!({ "keys": key, "tokens": { "nobody": ["x"] } }),
+            serde_json::json!({ "keys": key, "tokens": { "b": [] } }),
+            serde_json::json!({ "keys": key, "tokens": { "b": ["Bad Scope"] } }),
+            serde_json::json!({ "keys": key, "unknown": true }),
+        ] {
+            assert!(
+                matches!(err(entry(product.clone())), Some(ConfigError::Clients(_))),
+                "{product}"
+            );
+        }
+        // Without a product entry, a client still needs a redirect URI.
+        let no_redirect = serde_json::json!([{ "client_id": "c", "name": "C", "skin": "slug", "redirect_uris": [] }]);
+        assert!(matches!(err(no_redirect), Some(ConfigError::Clients(_))));
     }
 
     #[test]

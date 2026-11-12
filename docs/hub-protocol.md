@@ -3,7 +3,7 @@
 
 # AIS in `hub.v1`
 
-Status: proposed. Not built.
+Status: product tokens built; the rest proposed. Not deployed.
 The protocol itself lives in Prism Hub, which orchestrates the family:
 [`aiaiaiai-org/prism-hub` `docs/hub-protocol.md`](https://github.com/aiaiaiai-org/prism-hub/blob/master/docs/hub-protocol.md).
 This page is only what AIS owes it.
@@ -55,10 +55,17 @@ does not route requests between products; the hub does.
 
 On top of sign-in ([service design](service-design.md)) it adds:
 
-1. **Product tokens.** `client_credentials` with `private_key_jwt`: each
-   product signs its assertion with its own Ed25519 key, published at a
-   registered `jwks_uri`. The token is an EdDSA JWT, `aud` the product being
-   called (usually `prism-hub`), `exp` ≤ 5 minutes. No shared secrets.
+1. **Product tokens** (built, [runtime](runtime.md#clients)).
+   `client_credentials` with `private_key_jwt`: each product signs its
+   assertion (`iss` = `sub` = its `client_id`, `aud` the issuer or its
+   `/token`, `exp` ≤ 5 minutes, a single-use `jti`) with its own Ed25519 key.
+   AIS holds the public keys in the registry, inline, so it fetches nothing
+   to check them; a product rotates by registering a second key first. The
+   request names `audience` (another registered product) and may narrow
+   `scope`. The answer is an EdDSA JWT, `typ` `at+jwt`, `sub` the product,
+   `aud` the audience, `scope`, `exp` 5 minutes, signed with the key AIS
+   publishes in its JWKS. A relay (Prism Hub) may add `actor`, which becomes
+   `act.sub`. No shared secrets: a secret is refused on this grant.
 2. **Person passes.** A short JWT that says "for this one operation, this
    person is product B's `sub` X", with `aud` B, `azp` the asker, a `purpose`,
    `exp` 15 minutes and a single-use `jti`. Only the hub may ask for one, on

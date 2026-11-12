@@ -28,6 +28,17 @@ const SECRET: &str = "a-client-secret-of-thirty-two-bytes!";
 const PASSWORD: &str = "correct horse battery";
 const VERIFIER: &str = "a-pkce-verifier-that-is-long-enough-for-rfc-7636";
 
+const MARKET_KEY: [u8; 32] = [11; 32];
+const HUB_KEY: [u8; 32] = [12; 32];
+
+fn public_key(seed: [u8; 32]) -> String {
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+        ed25519_dalek::SigningKey::from_bytes(&seed)
+            .verifying_key()
+            .as_bytes(),
+    )
+}
+
 fn hex_sha256(value: &str) -> String {
     Sha256::digest(value.as_bytes())
         .iter()
@@ -43,6 +54,13 @@ async fn app() -> Router {
           "secret_sha256": hex_sha256(SECRET) },
         // A public client: no secret, only PKCE.
         { "client_id": "open-app", "name": "Open", "skin": "slug", "redirect_uris": [OPEN_CALLBACK] },
+        // Family products (hub.v1): keys and token grants, no secret.
+        { "client_id": "0xda-market", "name": "0xda-market", "skin": "cell", "redirect_uris": [],
+          "product": { "keys": [{ "kid": "m1", "x": public_key(MARKET_KEY) }],
+                       "tokens": { "prism-hub": ["hub.call", "hub.events"] } } },
+        { "client_id": "prism-hub", "name": "Prism Hub", "skin": "slug", "redirect_uris": [],
+          "product": { "keys": [{ "kid": "h1", "x": public_key(HUB_KEY) }],
+                       "tokens": { "0xda-market": ["hub.relay"] }, "relay": true } },
     ])
     .to_string();
     let config = Config::from_lookup(move |key| {
@@ -812,4 +830,237 @@ async fn health_styles_and_discovery_are_served() {
         keys["keys"][0].get("d").is_none(),
         "the private key never leaves"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Product tokens (hub.v1)
+// ---------------------------------------------------------------------------
+
+fn product_assertion(seed: [u8; 32], kid: &str, client: &str, jti: &str) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    crate::product_token::tests::assertion(
+        &ed25519_dalek::SigningKey::from_bytes(&seed),
+        kid,
+        &serde_json::json!({
+            "iss": client, "sub": client, "aud": format!("{ISSUER}/token"),
+            "iat": now, "exp": now + 120, "jti": jti,
+        }),
+    )
+}
+
+async fn ask_product_token(app: &Router, fields: &[(&str, &str)]) -> Reply {
+    let mut all = vec![
+        ("grant_type", "client_credentials"),
+        (
+            "client_assertion_type",
+            "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+        ),
+    ];
+    all.extend_from_slice(fields);
+    send(app, post_form("/token", "", &all)).await
+}
+
+fn token_claims(token: &str) -> (serde_json::Value, serde_json::Value) {
+    let decode = |part: &str| -> serde_json::Value {
+        serde_json::from_slice(
+            &base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(part)
+                .unwrap(),
+        )
+        .unwrap()
+    };
+    let mut parts = token.split('.');
+    (decode(parts.next().unwrap()), decode(parts.next().unwrap()))
+}
+
+#[tokio::test]
+async fn a_product_gets_a_token_for_the_hub_with_its_own_key() {
+    let app = app().await;
+    let assertion = product_assertion(MARKET_KEY, "m1", "0xda-market", "market-assertion-0001");
+    let reply = ask_product_token(
+        &app,
+        &[
+            ("client_assertion", &assertion),
+            ("audience", "prism-hub"),
+            ("scope", "hub.call"),
+        ],
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_eq!(reply.headers[header::CACHE_CONTROL], "no-store");
+    let body: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
+    assert_eq!(body["token_type"], "Bearer");
+    assert_eq!(body["expires_in"], 300);
+    assert_eq!(body["scope"], "hub.call");
+    let token = body["access_token"].as_str().unwrap();
+    let (header, claims) = token_claims(token);
+    assert_eq!(header["typ"], "at+jwt");
+    assert_eq!(header["alg"], "EdDSA");
+    assert_eq!(claims["iss"], ISSUER);
+    assert_eq!(claims["sub"], "0xda-market");
+    assert_eq!(claims["aud"], "prism-hub");
+    assert_eq!(claims["scope"], "hub.call");
+    assert!(claims.get("act").is_none());
+    // Signed with the key AIS publishes, like every token it issues.
+    let jwks: serde_json::Value =
+        serde_json::from_str(&send(&app, get("/.well-known/jwks.json")).await.body).unwrap();
+    let x = jwks["keys"][0]["x"].as_str().unwrap();
+    let key = ed25519_dalek::VerifyingKey::from_bytes(
+        &base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(x)
+            .unwrap()
+            .try_into()
+            .unwrap(),
+    )
+    .unwrap();
+    let (signed, signature) = token.rsplit_once('.').unwrap();
+    let signature = ed25519_dalek::Signature::from_slice(
+        &base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(signature)
+            .unwrap(),
+    )
+    .unwrap();
+    key.verify_strict(signed.as_bytes(), &signature).unwrap();
+
+    // No scope asked: every scope granted for that audience.
+    let assertion = product_assertion(MARKET_KEY, "m1", "0xda-market", "market-assertion-0002");
+    let reply = ask_product_token(
+        &app,
+        &[("client_assertion", &assertion), ("audience", "prism-hub")],
+    )
+    .await;
+    let body: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
+    assert_eq!(body["scope"], "hub.call hub.events");
+}
+
+#[tokio::test]
+async fn an_assertion_buys_one_token_only() {
+    let app = app().await;
+    let assertion = product_assertion(MARKET_KEY, "m1", "0xda-market", "market-assertion-once");
+    let fields = [
+        ("client_assertion", assertion.as_str()),
+        ("audience", "prism-hub"),
+    ];
+    assert_eq!(
+        ask_product_token(&app, &fields).await.status,
+        StatusCode::OK
+    );
+    let replay = ask_product_token(&app, &fields).await;
+    assert_eq!(replay.status, StatusCode::UNAUTHORIZED);
+    assert!(replay.body.contains("invalid_client"));
+}
+
+#[tokio::test]
+async fn a_product_token_is_refused_outside_the_registry() {
+    let app = app().await;
+    let market = |jti: &str| product_assertion(MARKET_KEY, "m1", "0xda-market", jti);
+    // Another product's key, or a key under another product's name.
+    let forged = product_assertion(HUB_KEY, "m1", "0xda-market", "forged-assertion-01");
+    let reply = ask_product_token(
+        &app,
+        &[("client_assertion", &forged), ("audience", "prism-hub")],
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
+    // A client that is not a product cannot use this grant at all.
+    let not_product = product_assertion(MARKET_KEY, "m1", "nilx-one", "not-a-product-0001");
+    let reply = ask_product_token(
+        &app,
+        &[
+            ("client_assertion", &not_product),
+            ("audience", "prism-hub"),
+        ],
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
+    // An audience or a scope that is not granted.
+    let reply = ask_product_token(
+        &app,
+        &[
+            ("client_assertion", &market("market-assertion-aud1")),
+            ("audience", "nilx-one"),
+        ],
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+    assert!(reply.body.contains("invalid_target"));
+    let reply = ask_product_token(
+        &app,
+        &[
+            ("client_assertion", &market("market-assertion-scp1")),
+            ("audience", "prism-hub"),
+            ("scope", "wallet.debit"),
+        ],
+    )
+    .await;
+    assert!(reply.body.contains("invalid_scope"));
+    // A product that is not a relay cannot name another product.
+    let reply = ask_product_token(
+        &app,
+        &[
+            ("client_assertion", &market("market-assertion-act1")),
+            ("audience", "prism-hub"),
+            ("actor", "prism-hub"),
+        ],
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+    // A secret is never accepted for this grant.
+    let reply = ask_product_token(
+        &app,
+        &[
+            ("client_assertion", &market("market-assertion-sec1")),
+            ("audience", "prism-hub"),
+            ("client_secret", SECRET),
+        ],
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
+    // The refusals above did not spend the assertions that were sound.
+    let reply = ask_product_token(
+        &app,
+        &[
+            ("client_assertion", &market("market-assertion-aud1")),
+            ("audience", "prism-hub"),
+        ],
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+}
+
+#[tokio::test]
+async fn the_hub_acts_for_a_product_it_relays() {
+    let app = app().await;
+    let assertion = product_assertion(HUB_KEY, "h1", "prism-hub", "hub-assertion-relay-01");
+    let reply = ask_product_token(
+        &app,
+        &[
+            ("client_assertion", &assertion),
+            ("audience", "0xda-market"),
+            ("actor", "0xda-market"),
+        ],
+    )
+    .await;
+    // The relay names the product whose request it carries; the target
+    // trusts the hub and still knows who asked.
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let body: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
+    let (_, claims) = token_claims(body["access_token"].as_str().unwrap());
+    assert_eq!(claims["sub"], "prism-hub");
+    assert_eq!(claims["act"]["sub"], "0xda-market");
+    // An actor that is not a registered product is refused.
+    let assertion = product_assertion(HUB_KEY, "h1", "prism-hub", "hub-assertion-relay-02");
+    let reply = ask_product_token(
+        &app,
+        &[
+            ("client_assertion", &assertion),
+            ("audience", "0xda-market"),
+            ("actor", "open-app"),
+        ],
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST);
 }

@@ -74,7 +74,26 @@ set of secrets and a service whose every identifier has changed.
   way, so no secret is generated, stored or carried for it. A client that
   does hold a secret (lowercase hex SHA-256 of it; AIS never keeps the secret)
   must present it, and a public client that presents one is refused.
-- **Redirect URIs** must match exactly and be https.
+- **Redirect URIs** must match exactly and be https. A product that only
+  speaks to other products (Prism Hub) may have none.
+- **`product`** makes the client a family product under `hub.v1`
+  ([hub protocol](hub-protocol.md)): it may ask `/token` for a product token
+  with `grant_type=client_credentials` and a `private_key_jwt` assertion.
+
+  ```json
+  "product": {
+    "keys": [{ "kid": "m1", "x": "<base64url Ed25519 public key>" }],
+    "tokens": { "prism-hub": ["hub.call", "hub.events"] },
+    "relay": false
+  }
+  ```
+
+  `keys` are one to four public keys by `kid`; two at once let a product
+  rotate without a gap. The private keys never leave the products. `tokens`
+  names the other registered products it may get a token for, and the scopes
+  it may hold for each; nothing listed, nothing granted. `relay` (Prism Hub
+  only) lets it name, as `actor`, the product whose request it carries; the
+  token then holds `act.sub`.
 - **The registry lives in `deploy/prepare-runtime-env.sh`.** The clients are
   public configuration, so adding a product is a reviewed edit of that file.
   The test `host_env_tests.rs` runs the script and feeds what it writes to this
@@ -86,6 +105,8 @@ set of secrets and a service whose every identifier has changed.
 - provider sign-in (Telegram, Discord, GitHub) and connected accounts;
 - an issuer session across products: every product sign-in asks for the
   password, which a password manager fills;
-- the change-event outbox.
+- the change-event outbox;
+- person passes, `resolve`, subject translation and `identity.providers`
+  (`hub.v1`).
 
 Each comes as its own change.
