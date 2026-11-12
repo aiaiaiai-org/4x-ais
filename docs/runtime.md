@@ -51,6 +51,11 @@ set of secrets and a service whose every identifier has changed.
 
 ## Clients
 
+The registry below matches the inspected code and live 0x1 redirect on
+2026-11-12: `client_id=nilx-one`. The target rename to `0x1` is pending a
+coordinated transition; see [identifier continuity](0x1-launch.md#identifier-transition-do-not-break-existing-bindings).
+Do not change this id independently of Core, Web and persisted bindings.
+
 ```json
 [
   {

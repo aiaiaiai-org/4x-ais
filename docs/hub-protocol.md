@@ -3,7 +3,10 @@
 
 # AIS in `hub.v1`
 
-Status: product tokens built; the rest proposed. Not deployed.
+Status: product tokens and the family operations marked below are implemented;
+remaining operations are proposed. Public AIS availability was observed on
+2026-11-12; these peer-service operations have not been verified live here.
+See [the AIS → 0x1 launch contract](0x1-launch.md).
 The protocol itself lives in Prism Hub, which orchestrates the family:
 [`aiaiaiai-org/prism-hub` `docs/hub-protocol.md`](https://github.com/aiaiaiai-org/prism-hub/blob/master/docs/hub-protocol.md).
 This page is only what AIS owes it.
@@ -108,13 +111,13 @@ On top of sign-in ([service design](service-design.md)) it adds:
 
 ## One identifier per product
 
-The 0x1 client is registered as `0x1`, the same identifier the orders already
-use as issuer, instead of `nilx-one` (owner decision, 2026-11-11). The
-`client_id` grammar already allows it. The pairwise `sub` depends on the
-`client_id`, so the rename must happen before AIS goes live and before the
-legacy Bond migration (`nilx-one/core#116`) is activated: that migration
-stores `(iss, pairwise sub)` against an existing Bond, and a later rename
-would orphan every such binding. Today AIS is not deployed and holds no
-identities, so nothing live moves. The rename is its
-own change here, in `deploy/prepare-runtime-env.sh`, and in `nilx-one/core`'s
-client configuration, together.
+The agreed target is `client_id=0x1`, aligning the product identifier with
+orders (owner decision, 2026-11-11). **It is not the current registry value.**
+The AIS registry, Core allowlist, Web constructor and live redirect inspected
+on 2026-11-12 still use `nilx-one`.
+
+The pairwise `sub` depends on `client_id`. AIS is publicly available, so the
+previous assumption that it is not deployed and has issued no identities is
+not a safe basis for renaming. Establish existing issued subjects and product
+bindings, then coordinate AIS, Core, Web and the migration contract before
+activation. See [the transition gate](0x1-launch.md#identifier-transition-do-not-break-existing-bindings).

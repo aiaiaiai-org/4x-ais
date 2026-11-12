@@ -1,14 +1,17 @@
 <!-- © 2026 aiaiaiai · aiaiaiai.org -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# aiaiaiai AIS: the auth identity service
+# aiaiaiai Identity Service: design
 
-Status: first identity runtime implemented (sign-in, registration, both skins, OIDC issuer); not deployed.
-Host: `auth.aiaiaiai.org` (edge-prod-2; activation pending).
+Status: historical design plus implemented identity runtime. For verified current
+status and remaining AIS → 0x1 work, read [the launch contract](0x1-launch.md).
+Public checks on 2026-11-12 found AIS available and 0x1 sign-in enabled;
+credential-to-game E2E acceptance remains unverified.
+Host: `auth.aiaiaiai.org` (edge-prod-2).
 Parent: [ECO-0001](https://github.com/aiaiaiai-org/.github/blob/main/ecosystem/identity/DESIGN.md),
 and `nilx-one/web` `docs/unified-auth.md` and `docs/identity-boundary.md`.
 
-## What exists today
+## Earlier implementation inventory (2026-11-09)
 
 Facts as of 2026-11-09. This repository now holds the identity runtime (`src/`, [runtime](runtime.md)): native sign-in and registration, the `cell` and `slug` skins, and the OIDC issuer whose tokens `nilx-one/core`'s client verifies. The `nilx-one/web` issuer below is the earlier implementation it replaces.
 
@@ -125,6 +128,11 @@ today.
 
 ## Cross-service: no tunnel
 
+The routing details in this earlier design are superseded by
+[hub-protocol.md](hub-protocol.md): OIDC remains direct; domain operations and
+identity events route through Hub. The event outbox remains AIS-owned. The
+list below is historical design, not proof that event delivery is implemented.
+
 The earlier plan assumed a tunnel between the servers. That was not needed. A
 sign-in already uses public HTTPS: the browser goes to `auth.aiaiaiai.org`,
 and Core calls `/token` and fetches JWKS over the same HTTPS. Cross-service
@@ -158,9 +166,11 @@ game concept.
 
 ## Data
 
-The new service starts with an empty database. Existing users are not migrated:
-the owner has authorized a full wipe, announced to users through the Telegram
-bot first (`docs/identity-boundary.md` in `nilx-one/web`).
+The earlier proposal assumed an empty AIS database and a wipe. Do not use that
+assumption for a live transition. The current tracked work preserves existing
+Bonds through proof-bound migration (Core #116/#115 and Web #621); see
+[the launch contract](0x1-launch.md#existing-bonds). No destructive action is
+authorized by this document.
 
 ## Repository conventions
 
