@@ -8,6 +8,28 @@ The protocol itself lives in Prism Hub, which orchestrates the family:
 [`aiaiaiai-org/prism-hub` `docs/hub-protocol.md`](https://github.com/aiaiaiai-org/prism-hub/blob/master/docs/hub-protocol.md).
 This page is only what AIS owes it.
 
+## Peer-service routing (owner decision, 2026-11-12)
+
+AIS is a peer service behind Prism Hub, not a gateway above it. All
+cross-service AIS operations are addressed by logical service ID and routed
+through Hub, including requests *to* AIS and AIS-originated events. Callers
+know Hub's endpoint, not AIS's internal endpoint; Hub knows the route.
+AIS remains the sole identity authority and performs its own domain-level
+authorization. Hub authenticates callers and checks target/operation grants.
+
+Example: `0xda-market → Hub → AIS → Hub → 0xda-market` for
+`identity.providers.list`. AIS returns only the provider names/status
+authorized for the requesting product and Bond; it must not disclose
+credentials, provider tokens, or arbitrary bindings. A verified person
+context and explicit scope are required; a bare `pub_dress` or Telegram
+ID is insufficient.
+
+Hub must not durably store requests, responses, signed provider evidence,
+passes or event payloads. Only transient in-memory relay and minimal
+non-sensitive routing/correlation metadata are permitted. Durable retries
+use AIS's own identity outbox; Hub retries or routes a source-owned reference,
+never a retained copy. An unavailable target yields an explicit failure.
+
 ## What AIS does in the family
 
 AIS stays the identity: people, `pub_dress`, password, sessions, provider
@@ -31,7 +53,7 @@ On top of sign-in ([service design](service-design.md)) it adds:
 4. **Subject translation for events.** The hub asks AIS to turn one product's
    `sub` into another's when it fans an event out; the answer is used once and
    not stored by the hub.
-5. **The identity outbox** (first-release scope): `identity.created`,
+5. **The AIS-owned identity outbox** (first-release scope): `identity.created`,
    `identity.prefix_changed`, `identity.deleted`, delivered to the hub.
 
 ## One identifier per product
