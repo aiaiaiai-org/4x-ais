@@ -311,6 +311,111 @@ async fn register_cell(app: &Router, prefix: &str, slug: &str) -> (Flow, Reply) 
 }
 
 #[tokio::test]
+async fn product_scoped_0x1_entry_keeps_oidc_verification_and_subject_isolation() {
+    let app = app().await;
+    let mut url = Url::parse(&format!("{ISSUER}/0x1")).unwrap();
+    let nonce = "nonce-0x1".to_owned();
+    url.query_pairs_mut()
+        .append_pair("response_type", "code")
+        .append_pair("redirect_uri", ONE_CALLBACK)
+        .append_pair("scope", "openid pub_dress")
+        .append_pair("state", "the-state")
+        .append_pair("nonce", &nonce)
+        .append_pair("code_challenge", &code_challenge(VERIFIER))
+        .append_pair("code_challenge_method", "S256");
+    // Entry is pinned to 0x1 without allowing the caller to override the client.
+    let reply = send(&app, get(&format!("/0x1?{}", url.query().unwrap()))).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert!(
+        reply
+            .body
+            .contains("aiaiaiai AIS × <span class=\"auth-product-name\">0x1</span>")
+    );
+    let flow = Flow {
+        client_id: "0x1",
+        callback: ONE_CALLBACK,
+        nonce,
+        request: hidden(&reply.body, "request"),
+        cookie: set_cookie(&reply.headers, "__Host-ais_authz").unwrap(),
+        page: reply.body,
+    };
+    let page = flow
+        .post(
+            &app,
+            &[("step", "identify"), ("prefix", "0"), ("slug", "scoped")],
+        )
+        .await;
+    let assignment = hidden(&page.body, "assignment");
+    let finished = flow
+        .post(
+            &app,
+            &[
+                ("step", "register"),
+                ("assignment", &assignment),
+                ("password", PASSWORD),
+                ("password_confirm", PASSWORD),
+            ],
+        )
+        .await;
+    let successor = flow
+        .verified(&app, &finished)
+        .await
+        .expect("0x1 audience verified");
+    assert_eq!(successor.pub_dress.as_deref(), Some("0x0scoped"));
+
+    // The pre-existing client keeps a distinct pairwise subject.
+    let legacy = open(&app, "nilx-one", ONE_CALLBACK, None).await;
+    let login = legacy
+        .post(
+            &app,
+            &[
+                ("step", "sign_in"),
+                ("pub_dress", "0x0scoped"),
+                ("password", PASSWORD),
+            ],
+        )
+        .await;
+    let predecessor = legacy
+        .verified(&app, &login)
+        .await
+        .expect("legacy audience verified");
+    assert_ne!(successor.subject, predecessor.subject);
+}
+
+#[tokio::test]
+async fn product_scoped_entry_fails_closed_without_a_valid_client_request() {
+    let app = app().await;
+    for uri in [
+        "/0x1",
+        "/0x1?client_id=prism",
+        "/0x1?client_id=nilx-one",
+        "/0x1?redirect_uri=https://attacker.example/cb",
+    ] {
+        let reply = send(&app, get(uri)).await;
+        assert_eq!(
+            reply.status,
+            StatusCode::BAD_REQUEST,
+            "{uri}: {}",
+            reply.body
+        );
+        assert!(reply.headers.get(header::LOCATION).is_none(), "{uri}");
+        assert!(
+            set_cookie(&reply.headers, "__Host-ais_authz").is_none(),
+            "{uri}"
+        );
+    }
+    let reply = send(
+        &app,
+        Request::get("/0x1")
+            .header(header::HOST, "attacker.example")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn a_cell_registration_reaches_the_0x1_client_as_a_verified_sign_in() {
     let app = app().await;
     let (flow, reply) = register_cell(&app, "f", "reezbylove").await;

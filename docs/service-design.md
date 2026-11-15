@@ -123,6 +123,31 @@ point keeps that until the component is changed to a whole-prefix selector,
 in its own change there. `static/auth.css` here skins the component as it is
 today.
 
+## 0x1 product-scoped browser entry
+
+The human-facing 0x1 sign-in entry is `https://auth.aiaiaiai.org/0x1`.
+It is a GET alias for the existing, fully validated `/authorize` OIDC code +
+PKCE flow, **not** an independent login method. A relying 0x1 host must
+generate `state`, `nonce`, PKCE challenge, and an exact registered callback
+first, then open `/0x1?` with those request parameters. The entry selects
+`client_id=0x1` exclusively: explicit alternative client IDs fail closed.
+The submitted credential form and token exchange still use `/authorize`
+and `/token`, preserving the normal issuer contract.
+
+A bare `/0x1` without a relying-party transaction cannot authenticate
+or link a messenger account: AIS intentionally refuses to issue a code.
+A Telegram or other messenger adapter must use an authenticated,
+one-time, short-lived login transaction initiated by its Core-backed host;
+the host binds that transaction to verified provider evidence and exchanges
+and verifies the OIDC result server-side. No authorization code, browser
+cookie, bearer token, or signing key goes to a chat message.
+
+This route does **not** register the `0x1` client in production or switch
+existing `nilx-one` subjects. The dedicated `0x1` client remains staged
+pending signed subject-continuity mapping and migration acceptance. Until
+those gates are satisfied, an unregistered client correctly receives a
+failure even for an otherwise valid scoped entry.
+
 ## Cross-service: no tunnel
 
 The earlier plan assumed a tunnel between the servers. That was not needed. A

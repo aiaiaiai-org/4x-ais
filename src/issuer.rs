@@ -109,6 +109,7 @@ pub fn router(config: Config, store: Store) -> Router {
         .route("/.well-known/openid-configuration", get(discovery))
         .route("/.well-known/jwks.json", get(jwks))
         .route("/authorize", get(authorize).post(submit))
+        .route("/0x1", get(one_entry))
         .route("/token", post(token))
         .route("/family/pass", post(crate::pass::issue))
         .route("/family/accounts", post(crate::family::put))
@@ -277,6 +278,24 @@ fn origin_of(uri: &str) -> String {
     Url::parse(uri)
         .map(|url| url.origin().ascii_serialization())
         .unwrap_or_default()
+}
+
+/// Human-facing 0x1 entry. The relying client must still supply a complete
+/// OIDC authorization request (PKCE/state/nonce/registered callback). A bare
+/// URL does not confer a product session or silently initiate a login.
+///
+/// Scope is fixed to the 0x1 client, never inferred from query parameters,
+/// the user's public address, or legacy nilx-one client credentials.
+async fn one_entry(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(mut query): Query<AuthorizeQuery>,
+) -> Response {
+    if query.client_id.as_deref().is_some_and(|id| id != "0x1") {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    query.client_id = Some("0x1".to_owned());
+    authorize(State(state), headers, Query(query)).await
 }
 
 async fn authorize(
