@@ -290,8 +290,9 @@ mod tests {
         assert_eq!(serialized["protocol_version"], "errors.v1");
         assert_eq!(serialized["project"], PROJECT);
         assert_eq!(serialized["severity"], "error");
-        assert_eq!(serialized["event_id"].as_str().unwrap().len(), 36);
-        assert_eq!(serialized["event_id"].as_str().unwrap().chars().nth(14), Some('4'));
+        let event_id = serialized["event_id"].as_str().unwrap();
+        assert_eq!(event_id.len(), 36);
+        assert_eq!(event_id.chars().nth(14), Some('4'));
         let observed = serialized["observed_at"].as_str().unwrap();
         assert!(chrono::DateTime::parse_from_rfc3339(observed).is_ok());
         assert_eq!(serialized["context"]["target"], "ais::issuer");

@@ -7,7 +7,7 @@ use tracing_subscriber::prelude::*;
 
 #[tokio::main]
 async fn main() {
-    let lookup = |key| std::env::var(key).ok();
+    let lookup = |key: &str| std::env::var(key).ok();
     let (reporter, invalid_reporting_config) = match Reporter::from_lookup(lookup) {
         Ok(reporter) => (reporter, false),
         Err(_) => (None, true),
