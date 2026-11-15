@@ -52,6 +52,10 @@ async fn app() -> Router {
         { "client_id": "nilx-one", "name": "0x1", "skin": "cell", "redirect_uris": [ONE_CALLBACK],
           "secret_sha256": hex_sha256(SECRET), "pub_dress": true,
           "product": { "keys": [{ "kid": "o1", "x": public_key(ONE_KEY) }] } },
+        // Staged successor: tests only. Production AIS_CLIENTS is unchanged
+        // until Core can consume this signed continuity evidence.
+        { "client_id": "0x1", "name": "0x1", "skin": "cell", "redirect_uris": [ONE_CALLBACK],
+          "pub_dress": true, "legacy_subject_client_id": "nilx-one" },
         { "client_id": "prism", "name": "Prism", "skin": "slug", "redirect_uris": [PRISM_CALLBACK],
           "secret_sha256": hex_sha256(SECRET) },
         // A public client: no secret, only PKCE.
@@ -177,7 +181,7 @@ async fn open(
     hint: Option<&str>,
 ) -> Flow {
     let nonce = format!("nonce-{client_id}");
-    let scope = if client_id == "nilx-one" {
+    let scope = if client_id == "nilx-one" || client_id == "0x1" {
         "openid pub_dress"
     } else {
         "openid"
@@ -226,7 +230,7 @@ impl Flow {
         ];
         let mut request = Request::post("/token")
             .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
-        if self.client_id == "open-app" {
+        if self.client_id == "open-app" || self.client_id == "0x1" {
             // A public client names itself and sends no secret.
             pairs.push(("client_id", self.client_id));
         } else {
@@ -536,6 +540,75 @@ async fn a_client_cannot_choose_its_own_limit_key() {
         last = send(&app, request).await.status;
     }
     assert_eq!(last, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
+async fn the_0x1_successor_token_proves_continuity_without_reusing_the_old_audience() {
+    let app = app().await;
+    let (legacy, created) = register_cell(&app, "0", "continuity").await;
+    let old = legacy.verified(&app, &created).await.unwrap();
+    let successor = open(&app, "0x1", ONE_CALLBACK, None).await;
+    let signed_in = successor
+        .post(
+            &app,
+            &[("step", "sign_in"), ("pub_dress", "0x0continuity"), ("password", PASSWORD)],
+        )
+        .await;
+    let back = location(&signed_in.headers);
+    let response = successor.exchange(&app, &query(&back, "code").unwrap()).await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+    let token: serde_json::Value = serde_json::from_str(&response.body).unwrap();
+    let jwt = token["id_token"].as_str().unwrap();
+    let payload = jwt.split('.').nth(1).unwrap();
+    let claims: serde_json::Value = serde_json::from_slice(
+        &base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(payload).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(claims["aud"], "0x1");
+    assert_ne!(claims["sub"], old.subject);
+    assert_eq!(claims["subject_continuity"]["from_client_id"], "nilx-one");
+    assert_eq!(claims["subject_continuity"]["sub"], old.subject);
+    let keys: JsonWebKeySet =
+        serde_json::from_str(&send(&app, get("/.well-known/jwks.json")).await.body).unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let verified = verify_id_token(
+        jwt, &keys,
+        &Expectation { issuer: ISSUER, client_id: "0x1", nonce: &successor.nonce },
+        now,
+    ).unwrap();
+    assert_eq!(verified.subject, claims["sub"].as_str().unwrap());
+    assert_eq!(
+        verify_id_token(
+            jwt, &keys,
+            &Expectation { issuer: ISSUER, client_id: "nilx-one", nonce: &successor.nonce },
+            now,
+        ),
+        Err(SignInError::InvalidToken("audience"))
+    );
+
+    // A second sign-in is stable; a token for another client does not disclose
+    // the old 0x1 subject, even when the person uses the same password.
+    let again = open(&app, "0x1", ONE_CALLBACK, None).await;
+    let retry = again.post(
+        &app,
+        &[("step", "sign_in"), ("pub_dress", "0x0continuity"), ("password", PASSWORD)],
+    ).await;
+    assert_eq!(again.verified(&app, &retry).await.unwrap().subject, verified.subject);
+    let prism = open(&app, "prism", PRISM_CALLBACK, None).await;
+    let prism_redirect = prism.post(
+        &app,
+        &[("step", "sign_in"), ("pub_dress", "0x0continuity"), ("password", PASSWORD)],
+    ).await;
+    let exchange = prism.exchange(&app, &query(&location(&prism_redirect.headers), "code").unwrap()).await;
+    let prism_token: serde_json::Value = serde_json::from_str(&exchange.body).unwrap();
+    let prism_claims: serde_json::Value = serde_json::from_slice(
+        &base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(prism_token["id_token"].as_str().unwrap().split('.').nth(1).unwrap()).unwrap(),
+    ).unwrap();
+    assert!(prism_claims.get("subject_continuity").is_none());
+    assert_ne!(prism_claims["sub"], claims["sub"]);
 }
 
 #[tokio::test]

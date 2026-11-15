@@ -66,6 +66,19 @@ set of secrets and a service whose every identifier has changed.
 - **`skin`** is presentation only. `cell` shows the whole prefix `0x0`–`0xf` as
   one choice; `slug` shows the name alone, and AIS assigns the prefix.
 - **`pub_dress`** allows the client to ask for the address in the token.
+- **Staged `client_id` migration:** an optional `legacy_subject_client_id`
+  may be configured **only** on the `0x1` successor to the currently
+  registered `nilx-one` client, with identical redirect URI, `cell` skin,
+  and `pub_dress` scope. When enabled, AIS adds a signed
+  `subject_continuity: { from_client_id: "nilx-one", sub: "..." }` claim
+  **only** to `0x1`-audience ID tokens. It attests that the predecessor and
+  successor subjects came from the same private AIS identity, rather than
+  treating a matching public address as proof. The regular `sub` remains
+  pairwise and distinct across the two clients; other products receive no
+  continuity claim. The current production registry continues using
+  `nilx-one`; the new entry is deliberately **not** added to
+  `deploy/prepare-runtime-env.sh` yet. Core acceptance and a separate
+  reviewed rollout are required before enabling the successor.
 - **`secret_sha256`** is optional. A client that has none is a **public
   client**: it holds no secret and names itself with `client_id` at `/token`.
   What binds its code to it is PKCE (S256, required of every client) and the
