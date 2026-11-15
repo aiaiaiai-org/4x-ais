@@ -47,14 +47,10 @@ impl ReporterConfig {
     fn from_lookup(get: impl Fn(&str) -> Option<String>) -> Result<Option<Self>, SetupError> {
         let endpoint = get("AIS_ERRORS_ENDPOINT").filter(|v| !v.is_empty());
         let token = get("AIS_ERRORS_INGEST_TOKEN").filter(|v| !v.is_empty());
-        let (Some(endpoint), Some(token)) = (endpoint, token) else {
-            return if get("AIS_ERRORS_ENDPOINT").is_none()
-                && get("AIS_ERRORS_INGEST_TOKEN").is_none()
-            {
-                Ok(None)
-            } else {
-                Err(SetupError::Incomplete)
-            };
+        let (endpoint, token) = match (endpoint, token) {
+            (None, None) => return Ok(None),
+            (Some(endpoint), Some(token)) => (endpoint, token),
+            _ => return Err(SetupError::Incomplete),
         };
 
         // Collector URL is an HTTPS origin, never a user-controlled request URL.
@@ -296,9 +292,8 @@ mod tests {
         assert_eq!(serialized["severity"], "error");
         assert_eq!(serialized["event_id"].as_str().unwrap().len(), 36);
         assert_eq!(serialized["event_id"].as_str().unwrap().chars().nth(14), Some('4'));
-        assert!(chrono::DateTime::parse_from_rfc3339(
-            serialized["observed_at"].as_str().unwrap()
-        ).is_ok());
+        let observed = serialized["observed_at"].as_str().unwrap();
+        assert!(chrono::DateTime::parse_from_rfc3339(observed).is_ok());
         assert_eq!(serialized["context"]["target"], "ais::issuer");
         assert!(serialized.get("authorization").is_none());
         assert!(serialized.get("request").is_none());
