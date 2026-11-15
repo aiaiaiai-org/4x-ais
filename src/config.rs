@@ -424,7 +424,10 @@ mod tests {
               "legacy_subject_client_id": "nilx-one" }
         ]);
         let config = Config::from_lookup(lookup(&[("AIS_CLIENTS", &pair.to_string())])).unwrap();
-        assert_eq!(config.clients["0x1"].legacy_subject_client_id.as_deref(), Some("nilx-one"));
+        assert_eq!(
+            config.clients["0x1"].legacy_subject_client_id.as_deref(),
+            Some("nilx-one")
+        );
         assert_eq!(config.clients["nilx-one"].legacy_subject_client_id, None);
         for malformed in [
             serde_json::json!([pair[1]]),

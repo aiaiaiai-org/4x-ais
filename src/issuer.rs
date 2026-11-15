@@ -874,7 +874,10 @@ async fn complete(ctx: &Ctx<'_>, identity: &Identity) -> Response {
                 nonce: request.nonce.clone(),
                 subject,
                 subject_continuity: ctx.client.legacy_subject_client_id.as_ref().map(|legacy| {
-                    (legacy.clone(), ctx.state.keys.pairwise_subject(legacy, &identity.subject))
+                    (
+                        legacy.clone(),
+                        ctx.state.keys.pairwise_subject(legacy, &identity.subject),
+                    )
                 }),
                 pub_dress: request.pub_dress_scope.then(|| identity.pub_dress.clone()),
                 auth_time: ctx.now,

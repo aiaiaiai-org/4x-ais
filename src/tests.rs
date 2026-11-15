@@ -551,18 +551,25 @@ async fn the_0x1_successor_token_proves_continuity_without_reusing_the_old_audie
     let signed_in = successor
         .post(
             &app,
-            &[("step", "sign_in"), ("pub_dress", "0x0continuity"), ("password", PASSWORD)],
+            &[
+                ("step", "sign_in"),
+                ("pub_dress", "0x0continuity"),
+                ("password", PASSWORD),
+            ],
         )
         .await;
     let back = location(&signed_in.headers);
-    let response = successor.exchange(&app, &query(&back, "code").unwrap()).await;
+    let response = successor
+        .exchange(&app, &query(&back, "code").unwrap())
+        .await;
     assert_eq!(response.status, StatusCode::OK, "{}", response.body);
     let token: serde_json::Value = serde_json::from_str(&response.body).unwrap();
     let jwt = token["id_token"].as_str().unwrap();
     let payload = jwt.split('.').nth(1).unwrap();
     let claims: serde_json::Value = serde_json::from_slice(
         &base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(payload).unwrap(),
+            .decode(payload)
+            .unwrap(),
     )
     .unwrap();
     assert_eq!(claims["aud"], "0x1");
@@ -572,17 +579,30 @@ async fn the_0x1_successor_token_proves_continuity_without_reusing_the_old_audie
     let keys: JsonWebKeySet =
         serde_json::from_str(&send(&app, get("/.well-known/jwks.json")).await.body).unwrap();
     let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
     let verified = verify_id_token(
-        jwt, &keys,
-        &Expectation { issuer: ISSUER, client_id: "0x1", nonce: &successor.nonce },
+        jwt,
+        &keys,
+        &Expectation {
+            issuer: ISSUER,
+            client_id: "0x1",
+            nonce: &successor.nonce,
+        },
         now,
-    ).unwrap();
+    )
+    .unwrap();
     assert_eq!(verified.subject, claims["sub"].as_str().unwrap());
     assert_eq!(
         verify_id_token(
-            jwt, &keys,
-            &Expectation { issuer: ISSUER, client_id: "nilx-one", nonce: &successor.nonce },
+            jwt,
+            &keys,
+            &Expectation {
+                issuer: ISSUER,
+                client_id: "nilx-one",
+                nonce: &successor.nonce
+            },
             now,
         ),
         Err(SignInError::InvalidToken("audience"))
@@ -591,22 +611,51 @@ async fn the_0x1_successor_token_proves_continuity_without_reusing_the_old_audie
     // A second sign-in is stable; a token for another client does not disclose
     // the old 0x1 subject, even when the person uses the same password.
     let again = open(&app, "0x1", ONE_CALLBACK, None).await;
-    let retry = again.post(
-        &app,
-        &[("step", "sign_in"), ("pub_dress", "0x0continuity"), ("password", PASSWORD)],
-    ).await;
-    assert_eq!(again.verified(&app, &retry).await.unwrap().subject, verified.subject);
+    let retry = again
+        .post(
+            &app,
+            &[
+                ("step", "sign_in"),
+                ("pub_dress", "0x0continuity"),
+                ("password", PASSWORD),
+            ],
+        )
+        .await;
+    assert_eq!(
+        again.verified(&app, &retry).await.unwrap().subject,
+        verified.subject
+    );
     let prism = open(&app, "prism", PRISM_CALLBACK, None).await;
-    let prism_redirect = prism.post(
-        &app,
-        &[("step", "sign_in"), ("pub_dress", "0x0continuity"), ("password", PASSWORD)],
-    ).await;
-    let exchange = prism.exchange(&app, &query(&location(&prism_redirect.headers), "code").unwrap()).await;
+    let prism_redirect = prism
+        .post(
+            &app,
+            &[
+                ("step", "sign_in"),
+                ("pub_dress", "0x0continuity"),
+                ("password", PASSWORD),
+            ],
+        )
+        .await;
+    let exchange = prism
+        .exchange(
+            &app,
+            &query(&location(&prism_redirect.headers), "code").unwrap(),
+        )
+        .await;
     let prism_token: serde_json::Value = serde_json::from_str(&exchange.body).unwrap();
     let prism_claims: serde_json::Value = serde_json::from_slice(
         &base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(prism_token["id_token"].as_str().unwrap().split('.').nth(1).unwrap()).unwrap(),
-    ).unwrap();
+            .decode(
+                prism_token["id_token"]
+                    .as_str()
+                    .unwrap()
+                    .split('.')
+                    .nth(1)
+                    .unwrap(),
+            )
+            .unwrap(),
+    )
+    .unwrap();
     assert!(prism_claims.get("subject_continuity").is_none());
     assert_ne!(prism_claims["sub"], claims["sub"]);
 }
