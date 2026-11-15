@@ -13,10 +13,12 @@ description = "aiaiaiai AIS: the auth identity service at auth.aiaiaiai.org"
 [dependencies]
 # The pub_dress grammar and its public label belong to the 0x1 contract; AIS
 # uses them, it does not redefine them.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 nilxone-contracts = { git = "https://github.com/nilx-one/core", rev = "2037913ee338a2c7cc453c353f0cf1c2b22cccb3" }
 argon2 = { version = "0.5", features = ["std"] }
 axum = { version = "0.8", features = ["form", "json", "query"] }
 base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 ed25519-dalek = "2"
 getrandom = "0.3"
 hmac = "0.12"

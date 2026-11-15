@@ -6,6 +6,7 @@
 
 pub mod config;
 pub mod crypto;
+pub mod errors;
 pub mod family;
 pub mod issuer;
 pub mod limiter;

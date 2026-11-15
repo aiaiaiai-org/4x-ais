@@ -19,9 +19,9 @@ refuses to start when a setting is missing or unsafe.
 - **Infra only carries and runs.** `aiaiaiai-org/infra` owns access to the
   servers; it never generates, stores or edits a value.
 - **The runtime file is rewritten whole on every deploy** from the three kept
-  secrets and the settings in the script. A key added to the host's copy by
-  hand is dropped on the next deploy: a setting belongs in the script, where it
-  is reviewed.
+  secrets and the settings in the script. Only the separately declared optional
+  4x-errors endpoint/token pair is also preserved; other hand-added keys are
+  dropped. New settings must be reviewed in the script.
 - **They are generated once and never replaced.** The script generates only
   when the runtime file does not exist, and only while the data volume does
   not either. A rerun, as on every deploy, changes none of the three. If the
@@ -40,6 +40,8 @@ refuses to start when a setting is missing or unsafe.
 | `AIS_CLIENTS`         | no     | JSON array of registered clients (below).                                                                                                     |
 | `AIS_DATABASE_URL`    | no     | Default `sqlite:///data/ais.db`, on the workload's volume.                                                                                    |
 | `AIS_BIND`            | no     | Default `0.0.0.0:1927`.                                                                                                                       |
+| `AIS_ERRORS_ENDPOINT` | no     | Optional HTTPS collector origin, sent only through the server-side errors.v1 adapter.                                                         |
+| `AIS_ERRORS_INGEST_TOKEN` | yes | Optional project-bound 4x-errors Bearer token; must be provisioned together with the endpoint.                                                |
 
 `AIS_SECRET` and `AIS_PASSWORD_PEPPER` are independent values. They are
 generated once and kept: a new `AIS_SECRET` changes every client's `sub`, a new
@@ -126,3 +128,12 @@ set of secrets and a service whose every identifier has changed.
   `identity.providers` (`hub.v1`).
 
 Each comes as its own change.
+
+## Optional 4x-errors reporting
+
+AIS sends sanitized server-side error events to the independent 4x-errors collector. It never sends a password, token, Bond identifier, request body, query, or raw tracing event fields. Only HTTP 5xx route templates/statuses and error-level tracing targets are reported. The project identity is fixed to `aiaiaiai-org/4x-ais`.
+
+Reporting is **off by default**. First deploy and configure the separate 4x-errors collector with the SHA-256 digest of a high-entropy token bound specifically to `aiaiaiai-org/4x-ais`. Then, on the AIS host, provision `AIS_ERRORS_ENDPOINT=https://<collector-origin>` and `AIS_ERRORS_INGEST_TOKEN=<secret>` together in its existing private `runtime.env` (mode 0600). Do not put the token in GitHub, frontend code, the AIS client registry, or logs. The host prepare script preserves only this declared pair across subsequent deploys; it does **not** generate a reporting token. Invalid or partial settings cannot delete the existing secret; the script refuses rewriting.
+
+Collector failures are non-critical: a bounded 64-event in-memory queue, a single worker, a one-second connection timeout, two-second overall timeout, and no retries ensure reporting never delays sign-in. Events can be dropped when the queue is full, on process shutdown or collector outage. This is best-effort telemetry, not an audit log. No Supabase credentials or database access belong in AIS. Enabling live reporting still requires a separate reviewed merge, deploy authorization, collector rollout and token provisioning.
+

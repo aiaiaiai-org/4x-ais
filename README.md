@@ -28,3 +28,5 @@ before the push. `auth.aiaiaiai.org` routes to the `4x-ais` workload on
 edge-prod-2 (`aiaiaiai-org/infra`); it is not deployed.
 
 Licensed under Apache-2.0 (`LICENSE`, `NOTICE`).
+
+Optional best-effort error reporting uses the independent 4x-errors errors.v1 HTTPS collector, never direct Supabase credentials. See [runtime setup](docs/runtime.md#optional-4x-errors-reporting). It stays disabled without a host-provisioned project token.

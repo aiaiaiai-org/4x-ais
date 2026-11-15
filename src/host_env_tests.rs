@@ -225,3 +225,39 @@ fn every_generated_signing_key_is_one_the_service_decodes() {
         Config::from_lookup(|key| values.get(key).cloned()).expect("the service starts");
     }
 }
+
+#[test]
+fn reporting_token_is_opt_in_and_preserved_by_host_rewrites() {
+    let directory = tempfile::tempdir().unwrap();
+    assert!(run(directory.path(), Volume::Absent).status.success());
+    let mut values = read(directory.path());
+    assert!(!values.contains_key("AIS_ERRORS_ENDPOINT"));
+    assert!(!values.contains_key("AIS_ERRORS_INGEST_TOKEN"));
+    values.insert(
+        "AIS_ERRORS_ENDPOINT".into(),
+        "https://errors.example.org".into(),
+    );
+    values.insert("AIS_ERRORS_INGEST_TOKEN".into(), "a".repeat(64));
+    write(directory.path(), &values);
+
+    let output = run(directory.path(), Volume::Exists);
+    assert!(output.status.success(), "{output:?}");
+    let renewed = read(directory.path());
+    assert_eq!(renewed, values);
+    Config::from_lookup(|key| renewed.get(key).cloned()).expect("identity config remains valid");
+}
+
+#[test]
+fn incomplete_reporting_config_is_rejected_without_losing_a_secret() {
+    let directory = tempfile::tempdir().unwrap();
+    assert!(run(directory.path(), Volume::Absent).status.success());
+    let mut values = read(directory.path());
+    values.insert("AIS_ERRORS_INGEST_TOKEN".into(), "a".repeat(64));
+    let original = write(directory.path(), &values);
+    assert!(!run(directory.path(), Volume::Exists).status.success());
+    assert_eq!(
+        std::fs::read_to_string(runtime_env(directory.path())).unwrap(),
+        original,
+        "the unpaired secret must not be silently removed"
+    );
+}
