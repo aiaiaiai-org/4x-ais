@@ -103,7 +103,7 @@ pub fn router(config: Config, store: Store) -> Router {
         codes: Arc::default(),
     };
     Router::new()
-        .route("/", get(|| async { page::landing() }))
+        .route("/", get(root_redirect))
         .route("/healthz", get(|| async { "ok\n" }))
         .route("/static/auth.css", get(stylesheet))
         .route("/.well-known/openid-configuration", get(discovery))
@@ -122,6 +122,26 @@ pub(crate) fn now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs())
         .unwrap_or_default()
+}
+
+/// The unspecific browser root temporarily points at the parent site.
+/// Product authentication is only performed by /authorize or a scoped
+/// relying-party entry supplied with state, nonce, PKCE and a callback.
+async fn root_redirect(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if !on_issuer_host(&state, &headers) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let mut response = StatusCode::MOVED_PERMANENTLY.into_response();
+    response.headers_mut().insert(
+        LOCATION,
+        HeaderValue::from_static("https://aiaiaiai.org/"),
+    );
+    // Do not retain a browser-cached redirect when the generic AIS entry
+    // becomes available in a future release.
+    response
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 async fn stylesheet() -> Response {
