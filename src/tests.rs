@@ -388,11 +388,18 @@ async fn direct_0x1_entry_is_visible_but_never_starts_authentication() {
     let reply = send(&app, get("/0x1")).await;
     assert_eq!(reply.status, StatusCode::OK);
     assert!(reply.body.contains("Sign in to 0x1"), "{}", reply.body);
-    assert!(reply.body.contains("https://nilx.one/api/v1/auth/aiaiaiai/start?return=%2F"));
+    assert!(
+        reply
+            .body
+            .contains("https://nilx.one/api/v1/auth/aiaiaiai/start?return=%2F")
+    );
     assert!(reply.headers.get(header::LOCATION).is_none());
     assert!(set_cookie(&reply.headers, "__Host-ais_authz").is_none());
     assert!(!reply.body.contains("name=\"request\""));
-    assert_eq!(reply.headers.get(header::CACHE_CONTROL).unwrap(), "no-store");
+    assert_eq!(
+        reply.headers.get(header::CACHE_CONTROL).unwrap(),
+        "no-store"
+    );
 
     let ukrainian = send(
         &app,
