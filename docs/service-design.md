@@ -123,6 +123,21 @@ point keeps that until the component is changed to a whole-prefix selector,
 in its own change there. `static/auth.css` here skins the component as it is
 today.
 
+## Browser root and product entry boundaries
+
+The bare browser address `https://auth.aiaiaiai.org/` has no relying-party
+transaction. Until AIS offers an explicitly designed generic sign-in flow,
+`GET /` returns a fixed `301 Location: https://aiaiaiai.org/` without
+creating a session, selecting a product, reflecting query parameters or setting
+an authorization cookie. A strict issuer-host check precedes the redirect.
+`Cache-Control: no-store` prevents this temporary route from being persisted
+as a permanent browser redirect when the generic AIS entry becomes available.
+
+The issuer still owns `/authorize`, `/token`, JWKS, discovery, and the
+human-facing `/0x1` entry; none of those redirect to the parent site.
+Clients must always create OIDC code + PKCE transactions server-side, and
+authentication never begins from untrusted `GET /` query parameters.
+
 ## 0x1 product-scoped browser entry
 
 The human-facing 0x1 sign-in entry is `https://auth.aiaiaiai.org/0x1`.
