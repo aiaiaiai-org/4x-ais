@@ -291,6 +291,33 @@ pub fn error_page(language: Language, status: StatusCode, message: Message) -> R
     document(language, status, heading, &body, "")
 }
 
+/// Visible 0x1 entry for direct browser visits without an OIDC transaction.
+/// The fixed host route starts the normal Core-owned state/nonce/PKCE flow;
+/// AIS itself never creates a login transaction from an untrusted URL.
+pub fn product_entry(language: Language) -> Response {
+    let (heading, explanation, action, note) = match language {
+        Language::English => (
+            "Sign in to 0x1",
+            "For your Bond's security, 0x1 must start a one-time sign-in request before you enter your password.",
+            "Continue through 0x1",
+            "If sign-in is not available, return to 0x1. Do not create another Bond to work around it.",
+        ),
+        Language::Ukrainian => (
+            "Вхід до 0x1",
+            "Для захисту вашого Bond застосунок 0x1 має створити одноразовий запит на вхід до введення пароля.",
+            "Продовжити через 0x1",
+            "Якщо вхід недоступний, поверніться до 0x1. Не створюйте іншого Bond для обходу цього кроку.",
+        ),
+    };
+    let body = format!(
+        "<p class=\"auth-product-name\">aiaiaiai AIS × 0x1</p><h1>{heading}</h1>\\
+         <p class=\"identity-status\">{explanation}</p>\\
+         <p><a class=\"text-action\" href=\"https://nilx.one/api/v1/auth/aiaiaiai/start?return=%2F\">{action}</a></p>\\
+         <p class=\"identity-status\">{note}</p>"
+    );
+    document(language, StatusCode::OK, heading, &body, "")
+}
+
 pub fn landing() -> Response {
     let body = "<p class=\"surface-kicker\">aiaiaiai AIS</p><h1>Sign in from a product</h1>\
                 <p class=\"identity-status\">Products send you here when you sign in.</p>";
