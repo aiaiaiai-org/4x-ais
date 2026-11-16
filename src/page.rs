@@ -310,10 +310,10 @@ pub fn product_entry(language: Language) -> Response {
         ),
     };
     let body = format!(
-        "<p class=\"auth-product-name\">aiaiaiai AIS × 0x1</p><h1>{heading}</h1>\\
-         <p class=\"identity-status\">{explanation}</p>\\
-         <p><a class=\"text-action\" href=\"https://nilx.one/api/v1/auth/aiaiaiai/start?return=%2F\">{action}</a></p>\\
-         <p class=\"identity-status\">{note}</p>"
+        r#"<p class="auth-product-name">aiaiaiai AIS × 0x1</p><h1>{heading}</h1>
+           <p class="identity-status">{explanation}</p>
+           <p><a class="text-action" href="https://nilx.one/api/v1/auth/aiaiaiai/start?return=%2F">{action}</a></p>
+           <p class="identity-status">{note}</p>"#
     );
     document(language, StatusCode::OK, heading, &body, "")
 }
