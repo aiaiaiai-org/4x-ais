@@ -134,8 +134,15 @@ first, then open `/0x1?` with those request parameters. The entry selects
 The submitted credential form and token exchange still use `/authorize`
 and `/token`, preserving the normal issuer contract.
 
-A bare `/0x1` without a relying-party transaction cannot authenticate
-or link a messenger account: AIS intentionally refuses to issue a code.
+A bare `/0x1` without a relying-party transaction renders a localized,
+static entry page with a fixed link to the 0x1 host's
+`/api/v1/auth/aiaiaiai/start?return=%2F`. That host is responsible for
+starting the real OIDC state, nonce and PKCE transaction before sending the
+browser back to AIS. The entry page never creates an authorization code,
+password form, AIS browser authorization cookie, session or arbitrary redirect.
+If 0x1 has not enabled this host flow, its start endpoint must fail closed
+until migration acceptance; the page alone does not enable sign-in or link
+a messenger account.
 A Telegram or other messenger adapter must use an authenticated,
 one-time, short-lived login transaction initiated by its Core-backed host;
 the host binds that transaction to verified provider evidence and exchanges
