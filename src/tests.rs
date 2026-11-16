@@ -1065,6 +1065,50 @@ async fn a_public_client_proves_its_code_with_pkce_and_no_secret() {
 }
 
 #[tokio::test]
+async fn issuer_root_redirects_only_to_the_fixed_parent_site() {
+    let app = app().await;
+
+    for uri in [
+        "/",
+        "/?return=https%3A%2F%2Fattacker.example",
+        "/?client_id=0x1",
+    ] {
+        let reply = send(&app, get(uri)).await;
+        assert_eq!(reply.status, StatusCode::MOVED_PERMANENTLY, "{uri}");
+        assert_eq!(
+            reply.headers.get(header::LOCATION).unwrap(),
+            "https://aiaiaiai.org/"
+        );
+        assert_eq!(
+            reply.headers.get(header::CACHE_CONTROL).unwrap(),
+            "no-store"
+        );
+        assert!(reply.headers.get(header::SET_COOKIE).is_none());
+        assert!(reply.body.is_empty());
+    }
+
+    // An invalid Host must not receive the canonical redirect.
+    let foreign = send(
+        &app,
+        Request::get("/")
+            .header(header::HOST, "attacker.example")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(foreign.status, StatusCode::NOT_FOUND);
+    assert!(foreign.headers.get(header::LOCATION).is_none());
+
+    // The OIDC issuer and product-scoped entry retain their own routes.
+    assert_eq!(send(&app, get("/0x1")).await.status, StatusCode::OK);
+    assert_eq!(send(&app, get("/healthz")).await.body, "ok\n");
+    assert_eq!(
+        send(&app, get("/.well-known/openid-configuration")).await.status,
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
 async fn health_styles_and_discovery_are_served() {
     let app = app().await;
     assert_eq!(send(&app, get("/healthz")).await.body, "ok\n");
