@@ -291,8 +291,24 @@ async fn one_entry(
     headers: HeaderMap,
     Query(mut query): Query<AuthorizeQuery>,
 ) -> Response {
+    if !on_issuer_host(&state, &headers) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
     if query.client_id.as_deref().is_some_and(|id| id != "0x1") {
         return StatusCode::BAD_REQUEST.into_response();
+    }
+    // An address-bar visit has no relying-party PKCE transaction. Show the
+    // product entry without inventing state, a code, or a product session.
+    if query.response_type.is_none()
+        && query.client_id.is_none()
+        && query.redirect_uri.is_none()
+        && query.scope.is_none()
+        && query.state.is_none()
+        && query.nonce.is_none()
+        && query.code_challenge.is_none()
+        && query.code_challenge_method.is_none()
+    {
+        return page::product_entry(Language::from(&headers));
     }
     query.client_id = Some("0x1".to_owned());
     authorize(State(state), headers, Query(query)).await

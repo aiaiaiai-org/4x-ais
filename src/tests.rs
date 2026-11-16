@@ -383,10 +383,44 @@ async fn product_scoped_0x1_entry_keeps_oidc_verification_and_subject_isolation(
 }
 
 #[tokio::test]
+async fn direct_0x1_entry_is_visible_but_never_starts_authentication() {
+    let app = app().await;
+    let reply = send(&app, get("/0x1")).await;
+    assert_eq!(reply.status, StatusCode::OK);
+    assert!(reply.body.contains("Sign in to 0x1"), "{}", reply.body);
+    assert!(
+        reply
+            .body
+            .contains("https://nilx.one/api/v1/auth/aiaiaiai/start?return=%2F")
+    );
+    assert!(reply.headers.get(header::LOCATION).is_none());
+    assert!(set_cookie(&reply.headers, "__Host-ais_authz").is_none());
+    assert!(!reply.body.contains("name=\"request\""));
+    assert_eq!(
+        reply.headers.get(header::CACHE_CONTROL).unwrap(),
+        "no-store"
+    );
+
+    let ukrainian = send(
+        &app,
+        Request::get("/0x1")
+            .header(header::HOST, HOST_NAME)
+            .header(header::ACCEPT_LANGUAGE, "uk-UA")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(ukrainian.status, StatusCode::OK);
+    assert!(ukrainian.body.contains("Вхід до 0x1"));
+    assert!(ukrainian.headers.get(header::LOCATION).is_none());
+    assert!(set_cookie(&ukrainian.headers, "__Host-ais_authz").is_none());
+}
+
+#[tokio::test]
 async fn product_scoped_entry_fails_closed_without_a_valid_client_request() {
     let app = app().await;
     for uri in [
-        "/0x1",
+        "/0x1?client_id=0x1",
         "/0x1?client_id=prism",
         "/0x1?client_id=nilx-one",
         "/0x1?redirect_uri=https://attacker.example/cb",
