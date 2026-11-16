@@ -318,12 +318,6 @@ pub fn product_entry(language: Language) -> Response {
     document(language, StatusCode::OK, heading, &body, "")
 }
 
-pub fn landing() -> Response {
-    let body = "<p class=\"surface-kicker\">aiaiaiai AIS</p><h1>Sign in from a product</h1>\
-                <p class=\"identity-status\">Products send you here when you sign in.</p>";
-    document(Language::English, StatusCode::OK, "aiaiaiai AIS", body, "")
-}
-
 fn document(
     language: Language,
     status: StatusCode,
