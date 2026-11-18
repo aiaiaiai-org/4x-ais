@@ -36,7 +36,7 @@ use crate::{
     config::{Client, Config, Skin},
     crypto::{Keys, random_token, sign_jwt, sign_jwt_typed},
     limiter::Limiter,
-    page::{self, Language, Message, Step, View},
+    page::{self, Language, Message, Step, View, World},
     password::{PasswordEngine, PolicyError},
     product_token::{self, ASSERTION_TYPE, GrantError, TOKEN_TTL},
     store::{DISCRIMINATORS, Identity, Registration, Store},
@@ -308,7 +308,7 @@ async fn one_entry(
         && query.code_challenge.is_none()
         && query.code_challenge_method.is_none()
     {
-        return page::product_entry(Language::from(&headers));
+        return page::product_entry(Language::from(&headers), &state.config.issuer_host());
     }
     query.client_id = Some("0x1".to_owned());
     authorize(State(state), headers, Query(query)).await
@@ -403,8 +403,11 @@ async fn authorize(
         .and_then(|value| state.keys.open::<Hint>(HINT_DOMAIN, &value))
         .filter(|hint| hint.expires_at > now)
         .and_then(|hint| PubDress::from_str(&hint.pub_dress).ok());
+    let issuer_host = state.config.issuer_host();
     let view = View {
         language,
+        world: World::of(&client.client_id),
+        issuer_host: &issuer_host,
         skin: client.skin,
         product: &client.name,
         signed: &signed,
@@ -458,8 +461,11 @@ struct Ctx<'a> {
 
 impl Ctx<'_> {
     fn render(&self, status: StatusCode, message: Option<Message>, step: Step<'_>) -> Response {
+        let issuer_host = self.state.config.issuer_host();
         let view = View {
             language: self.language,
+            world: World::of(&self.client.client_id),
+            issuer_host: &issuer_host,
             skin: self.client.skin,
             product: &self.client.name,
             signed: self.signed,

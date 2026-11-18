@@ -249,3 +249,343 @@ body {
   animation-name: credential-autofill-start;
   animation-duration: 1ms;
 }
+
+/*
+ * 0x1 world: an evening river city behind a glass panel. Presentation only;
+ * the markup, fields and flow are the same as every other product's. The
+ * scene is always dusk, so it sets its own scheme instead of following the
+ * system one. Gold is the action, sky blue the glow.
+ */
+body.world-0x1 {
+  --w-sky-top: #6f7fc4;
+  --w-sky-mid: #c9a3c8;
+  --w-sky-low: #f6c58f;
+  --w-sun: #ffe2a6;
+  --w-river: #5d6fb0;
+  --w-city: #3a3a5c;
+  --w-glass: rgba(42, 46, 72, 0.52);
+  --w-glass-line: rgba(255, 236, 200, 0.55);
+  --w-ink: #fbf7f0;
+  --w-muted: #e2dce8;
+  --w-gold-a: #ffe3a3;
+  --w-gold-b: #f2b558;
+  --w-gold-ink: #2a2116;
+  --w-glow: #8fd3ff;
+  --w-error: #ffc2cf;
+  color-scheme: dark;
+  position: relative;
+  overflow-x: hidden;
+  background: linear-gradient(180deg, var(--w-sky-top) 0%, var(--w-sky-mid) 42%, var(--w-sky-low) 68%, var(--w-river) 100%);
+  color: var(--w-ink);
+}
+
+.world-scene {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.world-sun {
+  position: absolute;
+  left: 50%;
+  bottom: 30%;
+  width: 46vmax;
+  height: 46vmax;
+  transform: translate(-50%, 50%);
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--w-sun) 0%, rgba(255, 210, 140, 0.45) 22%, rgba(255, 190, 140, 0) 60%);
+}
+
+.world-cloud {
+  position: absolute;
+  height: 3.2rem;
+  border-radius: 999px;
+  background: rgba(255, 230, 220, 0.35);
+  filter: blur(10px);
+  animation: world-drift 60s linear infinite alternate;
+}
+.world-cloud--a { top: 12%; left: 4%; width: 38vw; }
+.world-cloud--b { top: 22%; right: -6%; width: 30vw; animation-duration: 80s; }
+
+.world-skyline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 22%;
+  width: 100%;
+  height: 34vh;
+}
+.world-hills { fill: #4d5a7c; opacity: 0.75; }
+.world-city { fill: var(--w-city); opacity: 0.82; }
+.world-bridge {
+  fill: none;
+  stroke: var(--w-city);
+  stroke-width: 5;
+  opacity: 0.75;
+}
+
+.world-river {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 23%;
+  background:
+    repeating-linear-gradient(180deg, rgba(255, 220, 160, 0.22) 0 2px, transparent 2px 11px),
+    linear-gradient(180deg, #8d8fc0 0%, var(--w-river) 55%, #3d4778 100%);
+  -webkit-mask-image: linear-gradient(90deg, rgba(0, 0, 0, 0.85), #000 50%, rgba(0, 0, 0, 0.85));
+  mask-image: linear-gradient(90deg, rgba(0, 0, 0, 0.85), #000 50%, rgba(0, 0, 0, 0.85));
+}
+
+/* Chestnut blossom in the corners. */
+.world-blossom {
+  position: absolute;
+  top: -4rem;
+  width: 22rem;
+  height: 16rem;
+  background:
+    radial-gradient(circle at 18% 38%, #fff6f2 0 0.55rem, transparent 0.6rem),
+    radial-gradient(circle at 24% 30%, #ffe4ea 0 0.45rem, transparent 0.5rem),
+    radial-gradient(circle at 28% 42%, #fff 0 0.5rem, transparent 0.55rem),
+    radial-gradient(circle at 44% 22%, #ffeef0 0 0.5rem, transparent 0.55rem),
+    radial-gradient(circle at 49% 30%, #fff 0 0.4rem, transparent 0.45rem),
+    radial-gradient(circle at 60% 52%, #ffe6ea 0 0.5rem, transparent 0.55rem),
+    radial-gradient(circle at 66% 46%, #fff8f4 0 0.45rem, transparent 0.5rem),
+    radial-gradient(ellipse 3.4rem 1.4rem at 30% 58%, #7e9a46 98%, transparent),
+    radial-gradient(ellipse 3rem 1.2rem at 56% 36%, #8fae52 98%, transparent),
+    radial-gradient(ellipse 2.8rem 1.1rem at 72% 62%, #6c8a3c 98%, transparent),
+    radial-gradient(ellipse 2.6rem 1rem at 14% 70%, #8aa84e 98%, transparent);
+  filter: drop-shadow(0 8px 18px rgba(60, 40, 60, 0.25));
+  opacity: 0.92;
+}
+.world-blossom--left { left: -5rem; }
+.world-blossom--right { right: -7rem; transform: scaleX(-1) rotate(10deg); }
+
+/* The Avaia keeping watch at the panel's side. */
+.world-avaia {
+  position: absolute;
+  top: 46%;
+  left: max(1.5rem, calc(50% - 22rem));
+  width: 4.5rem;
+  height: 4.5rem;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff, #dfe3ea 55%, #aab1bf);
+  box-shadow: 0 0 0 3px rgba(255, 214, 140, 0.7), 0 0 26px rgba(255, 200, 120, 0.6);
+  animation: world-float 6s ease-in-out infinite;
+}
+.world-avaia::before {
+  content: '';
+  position: absolute;
+  inset: 22% 10% 22% 16%;
+  border-radius: 45%;
+  background: #12162a;
+}
+.world-avaia span {
+  position: absolute;
+  top: 42%;
+  width: 0.7rem;
+  height: 0.38rem;
+  border: 2px solid var(--w-glow);
+  border-bottom: 0;
+  border-radius: 1rem 1rem 0 0;
+  box-shadow: 0 -2px 8px var(--w-glow);
+}
+.world-avaia span:first-child { left: 34%; }
+.world-avaia span:last-child { left: 58%; }
+
+/* A holographic beacon on the embankment below the panel. */
+.world-beacon {
+  position: absolute;
+  left: 50%;
+  bottom: 7%;
+  width: min(80vw, 26rem);
+  height: 5rem;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  border: 2px solid rgba(143, 211, 255, 0.75);
+  box-shadow: 0 0 24px rgba(143, 211, 255, 0.6), inset 0 0 24px rgba(143, 211, 255, 0.35);
+  background: radial-gradient(ellipse, rgba(143, 211, 255, 0.32), transparent 70%);
+}
+.world-beacon span {
+  position: absolute;
+  inset: 22% 30%;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 220, 150, 0.85);
+  animation: world-pulse 3.5s ease-out infinite;
+}
+
+body.world-0x1 .ecosystem-auth-panel {
+  position: relative;
+  z-index: 1;
+  max-width: 30rem;
+  border-radius: 2rem;
+  border: 1px solid var(--w-glass-line);
+  background: var(--w-glass);
+  color: var(--w-ink);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  backdrop-filter: blur(18px) saturate(1.2);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.06) inset,
+    0 0 40px rgba(255, 200, 120, 0.35),
+    0 24px 60px rgba(30, 20, 50, 0.4);
+}
+
+body.world-0x1 .ecosystem-auth-panel .surface-kicker {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1.05rem;
+  color: var(--w-ink);
+}
+body.world-0x1 .ecosystem-auth-panel .world-mark {
+  width: 28px;
+  height: 28px;
+  stroke: var(--w-gold-b);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+/* The product name becomes the glowing 0x1 badge at the far end. */
+body.world-0x1 .ecosystem-auth-panel .auth-product-name {
+  margin: 0 0 0 auto;
+  padding: 0.15rem 0.85rem;
+  border: 2px solid var(--w-glow);
+  border-radius: 999px;
+  box-shadow: 0 0 14px rgba(143, 211, 255, 0.55);
+  color: var(--w-ink);
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+body.world-0x1 .ecosystem-auth-panel h1 {
+  margin: 1rem 0 0.25rem;
+  font-size: clamp(2rem, 8vw, 2.6rem);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+body.world-0x1 .ecosystem-auth-panel .world-subtitle {
+  margin: 0 0 1.25rem;
+  color: var(--w-muted);
+  font-size: 1.05rem;
+}
+
+body.world-0x1 .ecosystem-auth-panel label {
+  font-size: 0.875rem;
+  color: var(--w-muted);
+}
+body.world-0x1 .ecosystem-auth-panel .address-field,
+body.world-0x1 .ecosystem-auth-panel .password-field {
+  gap: 0.5rem;
+  padding: 0.35rem 0.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  border-radius: 1rem;
+  background: rgba(20, 22, 40, 0.28);
+}
+body.world-0x1 .ecosystem-auth-panel .address-field:focus-within,
+body.world-0x1 .ecosystem-auth-panel .password-field:focus-within {
+  border-color: var(--w-glow);
+  box-shadow: 0 0 0 1px var(--w-glow), 0 0 14px rgba(143, 211, 255, 0.4);
+}
+body.world-0x1 .ecosystem-auth-panel input:focus-visible,
+body.world-0x1 .ecosystem-auth-panel select:focus-visible {
+  outline: none;
+}
+body.world-0x1 .ecosystem-auth-panel select option {
+  color: #1b1c1a;
+}
+body.world-0x1 .ecosystem-auth-panel .address-field svg,
+body.world-0x1 .ecosystem-auth-panel .password-field svg {
+  flex: none;
+  color: var(--w-muted);
+}
+
+/* Gold primary action. */
+body.world-0x1 .ecosystem-auth-panel button[type='submit'],
+body.world-0x1 .ecosystem-auth-panel .world-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  min-height: 3.25rem;
+  margin-top: 0.5rem;
+  padding: 0 1.5rem;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--w-gold-a), var(--w-gold-b));
+  color: var(--w-gold-ink);
+  font-size: 1.15rem;
+  font-weight: 650;
+  text-decoration: none;
+  box-shadow: 0 0 22px rgba(255, 200, 110, 0.55), 0 1px 0 rgba(255, 255, 255, 0.6) inset;
+}
+body.world-0x1 .ecosystem-auth-panel .world-primary {
+  justify-self: stretch;
+  width: 100%;
+  box-sizing: border-box;
+}
+body.world-0x1 .ecosystem-auth-panel button[type='submit']:hover,
+body.world-0x1 .ecosystem-auth-panel .world-primary:hover {
+  filter: brightness(1.05);
+}
+body.world-0x1 .ecosystem-auth-panel button[type='submit'] svg,
+body.world-0x1 .ecosystem-auth-panel .world-primary svg {
+  stroke-width: 2;
+}
+
+body.world-0x1 .ecosystem-auth-panel > p,
+body.world-0x1 .ecosystem-auth-panel .identity-status,
+body.world-0x1 .ecosystem-auth-panel .password-note {
+  color: var(--w-muted);
+}
+body.world-0x1 .ecosystem-auth-panel .identity-error {
+  color: var(--w-error);
+}
+body.world-0x1 .ecosystem-auth-panel :focus-visible {
+  outline-color: var(--w-glow);
+}
+
+body.world-0x1 .ecosystem-auth-panel .world-origin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  margin: 1.25rem 0 0;
+  font-size: 0.95rem;
+  color: var(--w-muted);
+}
+body.world-0x1 .ecosystem-auth-panel .world-origin svg {
+  width: 18px;
+  height: 18px;
+}
+
+@keyframes world-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+@keyframes world-drift {
+  to { transform: translateX(6vw); }
+}
+@keyframes world-pulse {
+  from { transform: scale(0.6); opacity: 1; }
+  to { transform: scale(1.6); opacity: 0; }
+}
+
+/* Narrow screens: the Avaia sits above the panel instead of beside it. */
+@media (max-width: 40rem) {
+  .world-avaia {
+    top: 1.5rem;
+    left: 1.5rem;
+    width: 3.25rem;
+    height: 3.25rem;
+  }
+  .world-blossom { width: 14rem; height: 11rem; }
+  .world-beacon { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .world-avaia,
+  .world-cloud,
+  .world-beacon span {
+    animation: none;
+  }
+}

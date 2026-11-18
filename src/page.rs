@@ -119,8 +119,30 @@ pub enum Step<'a> {
     },
 }
 
+/// Where the page is set. Presentation only: the flow, fields, CSP and the
+/// token contract are identical in every world.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum World {
+    /// The neutral aiaiaiai surface every product gets.
+    Ecosystem,
+    /// The 0x1 evening scene, for the 0x1 client and its legacy `nilx-one`.
+    OneX,
+}
+
+impl World {
+    pub fn of(client_id: &str) -> Self {
+        match client_id {
+            "0x1" | "nilx-one" => Self::OneX,
+            _ => Self::Ecosystem,
+        }
+    }
+}
+
 pub struct View<'a> {
     pub language: Language,
+    pub world: World,
+    /// `host[:port]` of this issuer, shown as the page's own address.
+    pub issuer_host: &'a str,
     pub skin: Skin,
     pub product: &'a str,
     pub signed: &'a str,
@@ -144,6 +166,17 @@ pub fn render(view: &View<'_>, status: StatusCode, step: Step<'_>) -> Response {
         "<input type=\"hidden\" name=\"request\" value=\"{}\">",
         escape(view.signed)
     );
+    let one = view.world == World::OneX;
+    let sign_in_heading = if one {
+        t("Sign in to 0x1", "Увійти в 0x1")
+    } else {
+        t("Sign in", "Вхід")
+    };
+    let (user_icon, lock_icon, enter_icon) = if one {
+        (ICON_USER, ICON_LOCK, ICON_ENTER)
+    } else {
+        ("", "", "")
+    };
     let name_label = match view.skin {
         Skin::Cell => "pub_dress",
         Skin::Slug => t("Name", "Ім'я"),
@@ -152,48 +185,48 @@ pub fn render(view: &View<'_>, status: StatusCode, step: Step<'_>) -> Response {
         Step::Identify { prefix, slug } => {
             let field = match view.skin {
                 Skin::Cell => format!(
-                    "<div class=\"address-field\"><span class=\"digit-selector\">{select}</span>\
+                    "<div class=\"address-field\">{user_icon}<span class=\"digit-selector\">{select}</span>\
                      <input id=\"slug\" name=\"slug\" value=\"{slug}\" autocomplete=\"username\" autocapitalize=\"none\" \
                      spellcheck=\"false\" required autofocus></div>",
                     select = prefix_select(prefix, &DISCRIMINATORS, view.language),
                     slug = escape(slug),
                 ),
                 Skin::Slug => format!(
-                    "<div class=\"address-field\"><input id=\"slug\" name=\"slug\" value=\"{}\" autocomplete=\"username\" \
+                    "<div class=\"address-field\">{user_icon}<input id=\"slug\" name=\"slug\" value=\"{}\" autocomplete=\"username\" \
                      autocapitalize=\"none\" spellcheck=\"false\" required autofocus></div>",
                     escape(slug)
                 ),
             };
             (
-                t("Sign in", "Вхід"),
+                sign_in_heading,
                 format!(
                     "<input type=\"hidden\" name=\"step\" value=\"identify\"><label for=\"slug\">{name_label}</label>{field}\
-                     <button type=\"submit\">{}</button>",
+                     <button type=\"submit\">{enter_icon}{}</button>",
                     t("Continue", "Далі")
                 ),
             )
         }
         Step::ChoosePrefix { slug, prefixes } => (
-            t("Sign in", "Вхід"),
+            sign_in_heading,
             format!(
                 "<input type=\"hidden\" name=\"step\" value=\"choose\"><input type=\"hidden\" name=\"slug\" value=\"{slug}\">\
                  <label for=\"slug-view\">{name_label}</label>\
-                 <div class=\"address-field\"><span class=\"digit-selector\">{select}</span>\
+                 <div class=\"address-field\">{user_icon}<span class=\"digit-selector\">{select}</span>\
                  <input id=\"slug-view\" value=\"{slug}\" readonly></div>\
-                 <button type=\"submit\">{next}</button>",
+                 <button type=\"submit\">{enter_icon}{next}</button>",
                 slug = escape(slug),
                 select = prefix_select(prefixes[0], prefixes, view.language),
                 next = t("Continue", "Далі"),
             ),
         ),
         Step::SignIn { pub_dress, slug } => (
-            t("Sign in", "Вхід"),
+            sign_in_heading,
             format!(
                 "<input type=\"hidden\" name=\"step\" value=\"sign_in\">{username}\
                  <label for=\"password\">{password}</label>\
-                 <div class=\"password-field\"><input id=\"password\" name=\"password\" type=\"password\" \
+                 <div class=\"password-field\">{lock_icon}<input id=\"password\" name=\"password\" type=\"password\" \
                  autocomplete=\"current-password\" required autofocus></div>\
-                 <button type=\"submit\">{submit}</button>",
+                 <button type=\"submit\">{enter_icon}{submit}</button>",
                 username = username_field(view, pub_dress, slug, name_label),
                 password = t("Password", "Пароль"),
                 submit = t("Sign in", "Увійти"),
@@ -210,12 +243,12 @@ pub fn render(view: &View<'_>, status: StatusCode, step: Step<'_>) -> Response {
                  <input type=\"hidden\" name=\"assignment\" value=\"{assignment}\">\
                  <p class=\"identity-status\">{free}</p>{username}\
                  <label for=\"password\">{password}</label>\
-                 <div class=\"password-field\"><input id=\"password\" name=\"password\" type=\"password\" \
+                 <div class=\"password-field\">{lock_icon}<input id=\"password\" name=\"password\" type=\"password\" \
                  autocomplete=\"new-password\" minlength=\"8\" maxlength=\"128\" required autofocus></div>\
                  <label for=\"password_confirm\">{confirm}</label>\
-                 <div class=\"password-field\"><input id=\"password_confirm\" name=\"password_confirm\" type=\"password\" \
+                 <div class=\"password-field\">{lock_icon}<input id=\"password_confirm\" name=\"password_confirm\" type=\"password\" \
                  autocomplete=\"new-password\" minlength=\"8\" maxlength=\"128\" required></div>\
-                 <p class=\"password-note\">{note}</p><button type=\"submit\">{submit}</button>",
+                 <p class=\"password-note\">{note}</p><button type=\"submit\">{enter_icon}{submit}</button>",
                 assignment = escape(assignment),
                 free = t("This name is free.", "Це ім'я вільне."),
                 username = username_field(view, pub_dress, slug, name_label),
@@ -229,13 +262,32 @@ pub fn render(view: &View<'_>, status: StatusCode, step: Step<'_>) -> Response {
             ),
         ),
     };
+    let (mark, subtitle, origin) = if one {
+        (
+            ICON_MARK,
+            format!(
+                "<p class=\"world-subtitle\">{}</p>",
+                t("One sign-in page", "Єдина сторінка авторизації")
+            ),
+            world_origin(view.issuer_host),
+        )
+    } else {
+        ("", String::new(), String::new())
+    };
     let body = format!(
-        "<p class=\"surface-kicker\">aiaiaiai AIS × <span class=\"auth-product-name\">{product}</span></p>\
-         <h1>{heading}</h1>{notice}<form class=\"identity-form ecosystem-auth-form\" method=\"post\" action=\"/authorize\">\
-         {request}{form}</form>",
+        "<p class=\"surface-kicker\">{mark}aiaiaiai AIS × <span class=\"auth-product-name\">{product}</span></p>\
+         <h1>{heading}</h1>{subtitle}{notice}<form class=\"identity-form ecosystem-auth-form\" method=\"post\" action=\"/authorize\">\
+         {request}{form}</form>{origin}",
         product = escape(view.product),
     );
-    document(view.language, status, heading, &body, view.redirect_origin)
+    document(
+        view.language,
+        view.world,
+        status,
+        heading,
+        &body,
+        view.redirect_origin,
+    )
 }
 
 /// The account name a password manager files the password under. It is the
@@ -248,9 +300,14 @@ fn username_field(view: &View<'_>, pub_dress: &str, slug: &str, name_label: &str
     );
     match view.skin {
         Skin::Cell => format!(
-            "{hidden}<label for=\"username\">{name_label}</label><div class=\"address-field\">\
+            "{hidden}<label for=\"username\">{name_label}</label><div class=\"address-field\">{icon}\
              <input id=\"username\" value=\"{}\" autocomplete=\"username\" readonly></div>",
-            escape(pub_dress)
+            escape(pub_dress),
+            icon = if view.world == World::OneX {
+                ICON_USER
+            } else {
+                ""
+            },
         ),
         Skin::Slug => format!(
             "{hidden}<p class=\"identity-status\">{} <strong>{}</strong></p>\
@@ -288,13 +345,13 @@ pub fn error_page(language: Language, status: StatusCode, message: Message) -> R
         "<p class=\"surface-kicker\">aiaiaiai AIS</p><h1>{heading}</h1><p class=\"identity-error\" role=\"alert\">{}</p>",
         message.text(language)
     );
-    document(language, status, heading, &body, "")
+    document(language, World::Ecosystem, status, heading, &body, "")
 }
 
 /// Visible 0x1 entry for direct browser visits without an OIDC transaction.
 /// The fixed host route starts the normal Core-owned state/nonce/PKCE flow;
 /// AIS itself never creates a login transaction from an untrusted URL.
-pub fn product_entry(language: Language) -> Response {
+pub fn product_entry(language: Language, issuer_host: &str) -> Response {
     let (heading, explanation, action, note) = match language {
         Language::English => (
             "Sign in to 0x1",
@@ -309,23 +366,76 @@ pub fn product_entry(language: Language) -> Response {
             "Якщо вхід недоступний, поверніться до 0x1. Не створюйте іншого Bond для обходу цього кроку.",
         ),
     };
+    let origin = world_origin(issuer_host);
     let body = format!(
-        r#"<p class="auth-product-name">aiaiaiai AIS × 0x1</p><h1>{heading}</h1>
+        r#"<p class="surface-kicker">{ICON_MARK}<span class="world-wordmark">aiaiaiai AIS × </span><span class="auth-product-name">0x1</span></p><h1>{heading}</h1>
            <p class="identity-status">{explanation}</p>
-           <p><a class="text-action" href="https://nilx.one/api/v1/auth/aiaiaiai/start?return=%2F">{action}</a></p>
-           <p class="identity-status">{note}</p>"#
+           <p><a class="text-action world-primary" href="https://nilx.one/api/v1/auth/aiaiaiai/start?return=%2F">{ICON_ENTER}{action}</a></p>
+           <p class="identity-status">{note}</p>{origin}"#
     );
-    document(language, StatusCode::OK, heading, &body, "")
+    document(language, World::OneX, StatusCode::OK, heading, &body, "")
 }
 
 pub fn landing() -> Response {
     let body = "<p class=\"surface-kicker\">aiaiaiai AIS</p><h1>Sign in from a product</h1>\
                 <p class=\"identity-status\">Products send you here when you sign in.</p>";
-    document(Language::English, StatusCode::OK, "aiaiaiai AIS", body, "")
+    document(
+        Language::English,
+        World::Ecosystem,
+        StatusCode::OK,
+        "aiaiaiai AIS",
+        body,
+        "",
+    )
 }
+
+/// The page's own address under the panel: a plain fact, not a link out.
+fn world_origin(issuer_host: &str) -> String {
+    format!(
+        "<p class=\"world-origin\">{ICON_LINK}<span>{}/0x1</span></p>",
+        escape(issuer_host)
+    )
+}
+
+/// Decorative evening river city behind the 0x1 panel. CSS-only motion; the
+/// strict CSP allows inline SVG markup but no script and no style attributes.
+const WORLD_SCENE: &str = concat!(
+    "<div class=\"world-scene\" aria-hidden=\"true\">",
+    "<div class=\"world-sun\"></div>",
+    "<div class=\"world-cloud world-cloud--a\"></div><div class=\"world-cloud world-cloud--b\"></div>",
+    "<svg class=\"world-skyline\" viewBox=\"0 0 1200 320\" preserveAspectRatio=\"xMidYMax slice\">",
+    "<path class=\"world-hills\" d=\"M0 250 C120 205 220 215 330 230 C450 190 560 200 640 225 C760 195 880 180 1000 215 C1080 205 1150 210 1200 220 V320 H0Z\"/>",
+    // Domes and a bell tower on the left bank.
+    "<path class=\"world-city\" d=\"M90 232 V196 H104 V184 Q112 168 120 184 V196 H134 V232Z ",
+    "M150 232 V150 L158 140 V118 L162 104 L166 118 V140 L174 150 V232Z ",
+    "M190 232 V204 Q210 176 230 204 V232Z M240 232 V214 H262 V200 Q270 190 278 200 V232Z\"/>",
+    // The bridge across the river.
+    "<path class=\"world-bridge\" d=\"M560 258 Q690 196 820 258 M560 258 H960 M600 258 V242 M650 258 V222 M700 258 V212 M750 258 V214 M800 258 V246\"/>",
+    // A monument on the right hills.
+    "<path class=\"world-city\" d=\"M1040 214 V150 L1046 148 L1050 96 L1056 90 L1060 98 L1062 148 L1068 150 V214Z ",
+    "M980 214 V196 H1010 V214Z M1090 214 V192 H1130 V214Z\"/>",
+    "</svg>",
+    "<div class=\"world-river\"></div>",
+    "<div class=\"world-blossom world-blossom--left\"></div><div class=\"world-blossom world-blossom--right\"></div>",
+    "<div class=\"world-avaia\"><span></span><span></span></div>",
+    "<div class=\"world-beacon\"><span></span></div>",
+    "</div>",
+);
+
+const ICON_MARK: &str = "<svg class=\"world-mark\" viewBox=\"0 0 24 24\" aria-hidden=\"true\">\
+    <path d=\"M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4\"/></svg>";
+const ICON_USER: &str = "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\">\
+    <circle cx=\"12\" cy=\"8\" r=\"4\"/><path d=\"M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6\"/></svg>";
+const ICON_LOCK: &str = "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\">\
+    <rect x=\"5\" y=\"10\" width=\"14\" height=\"11\" rx=\"2\"/><path d=\"M8 10V7a4 4 0 0 1 8 0v3M12 14v3\"/></svg>";
+const ICON_ENTER: &str = "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\">\
+    <path d=\"M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M3 12h12M11 8l4 4-4 4\"/></svg>";
+const ICON_LINK: &str = "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\">\
+    <path d=\"M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1 1M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 0 0 6 6l1-1\"/></svg>";
 
 fn document(
     language: Language,
+    world: World,
     status: StatusCode,
     title: &str,
     body: &str,
@@ -341,7 +451,17 @@ fn document(
          <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
          <meta name=\"referrer\" content=\"no-referrer\"><title>{title} · aiaiaiai AIS</title>\
          <link rel=\"stylesheet\" href=\"/static/auth.css\"></head>\
-         <body><main class=\"ecosystem-auth-panel\">{body}</main></body></html>"
+         <body{class}>{scene}<main class=\"ecosystem-auth-panel\">{body}</main></body></html>",
+        class = if world == World::OneX {
+            " class=\"world-0x1\""
+        } else {
+            ""
+        },
+        scene = if world == World::OneX {
+            WORLD_SCENE
+        } else {
+            ""
+        },
     );
     let mut response = (status, html).into_response();
     let headers = response.headers_mut();

@@ -416,6 +416,46 @@ async fn direct_0x1_entry_is_visible_but_never_starts_authentication() {
     assert!(set_cookie(&ukrainian.headers, "__Host-ais_authz").is_none());
 }
 
+/// The 0x1 world is presentation for the 0x1 clients only. It adds no
+/// script, no style attribute and no field: other products keep the neutral
+/// page, and the CSP stays as strict as before.
+#[tokio::test]
+async fn only_the_0x1_clients_open_in_the_0x1_world() {
+    let app = app().await;
+    for (client_id, callback) in [("nilx-one", ONE_CALLBACK), ("0x1", ONE_CALLBACK)] {
+        let flow = open(&app, client_id, callback, None).await;
+        assert!(
+            flow.page.contains("<body class=\"world-0x1\">"),
+            "{}",
+            flow.page
+        );
+        assert!(flow.page.contains("Sign in to 0x1"), "{}", flow.page);
+        assert!(
+            flow.page.contains(&format!("{HOST_NAME}/0x1")),
+            "{}",
+            flow.page
+        );
+        assert!(!flow.page.contains("<script"));
+        assert!(!flow.page.contains(" style="));
+    }
+    for (client_id, callback) in [("prism", PRISM_CALLBACK), ("open-app", OPEN_CALLBACK)] {
+        let flow = open(&app, client_id, callback, None).await;
+        assert!(flow.page.contains("<body><main"), "{}", flow.page);
+        assert!(!flow.page.contains("world-"), "{}", flow.page);
+    }
+
+    let entry = send(&app, get("/0x1")).await;
+    assert!(entry.body.contains("<body class=\"world-0x1\">"));
+    assert!(!entry.body.contains("<script"));
+    assert!(!entry.body.contains(" style="));
+    let csp = entry.headers.get("content-security-policy").unwrap();
+    assert!(
+        csp.to_str()
+            .unwrap()
+            .starts_with("default-src 'none'; style-src 'self';")
+    );
+}
+
 #[tokio::test]
 async fn product_scoped_entry_fails_closed_without_a_valid_client_request() {
     let app = app().await;
