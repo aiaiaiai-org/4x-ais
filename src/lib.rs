@@ -15,6 +15,7 @@ pub mod password;
 pub mod product_token;
 pub mod relay;
 pub mod store;
+mod telegram_purchase;
 
 pub use issuer::router;
 

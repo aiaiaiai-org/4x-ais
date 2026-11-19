@@ -118,3 +118,57 @@ would orphan every such binding. Today AIS is not deployed and holds no
 identities, so nothing live moves. The rename is its
 own change here, in `deploy/prepare-runtime-env.sh`, and in `nilx-one/core`'s
 client configuration, together.
+
+## Telegram Special purchase authorization
+
+Two operations use the existing product signing keys and the Hub relay. The
+product token for Hub and the relay token for AIS must both carry the scope
+for the operation. The runtime registry must grant these scopes explicitly.
+
+- `POST /family/telegram-link` (`telegram.link.put`): 0x1 reports a verified
+  Telegram binding as `{subject, telegram_id, revision}` using its AIS pairwise
+  subject. The revision must increase for that person. Send an explicit
+  `null` Telegram ID when the link is removed. AIS keeps the last revision
+  after removal, rejects older reports and prevents a Telegram account from
+  being bound to two people. Market has no binding write access.
+- `POST /family/telegram-purchase` (`telegram.special.purchase`): the
+  authenticated product supplies the confirmed
+  `{telegram_id, order_id, sku, quantity, price_id, amount_minor}`. AIS
+  resolves the person and checks that they have a linked 0x1 account. This
+  endpoint accepts one `0x1_special_1m` in seeds. It returns a two-minute
+  `purchase+jwt` signed by AIS, addressed to 0x1, with its pairwise subject,
+  Telegram ID, requesting product and the exact confirmed order terms.
+
+A permit identifies the buyer and authorizes submission of these terms. It
+does not attest a price, balance, or completed payment. The receiving 0x1
+operation must verify the signature, issuer, audience, expiry, product and
+current Telegram binding, validate the price revision against the authoritative
+offer, and atomically settle the wallet and subscription. It must persist one
+result per requesting product and order ID, reject mismatched retries and
+return the original result for identical retries. The bot must only report a
+completed purchase after that result comes back.
+
+The wallet order key is not the raw `order_id`. AIS accepts a product-local ID
+of 1 to 128 bytes, while 0x1 settlement accepts 8 to 128 bytes and deduplicates
+on one ID. 0x1 must derive a bounded key from the verified `azp` and `order_id`
+under a checkout namespace, so short and maximum-length IDs both settle and the
+same local ID from two products cannot collide. Permits name audience `0x1` in
+every environment, so the receiver must pin its own environment's AIS issuer,
+signing keys and authorized product identities. A development permit must be
+rejected by production settlement.
+
+Trust boundary: AIS does not check that the Telegram user is present. It trusts
+the `telegram_id` the requesting product asserts, under that product's key and
+explicit grant. A compromised product key can obtain permits for any linked
+Telegram account, limited to this SKU. The limits are enforced by 0x1: the
+price check against the authoritative offer, one result per requesting product
+and order ID, and the current binding check.
+
+Both endpoints fail closed until the registry carries the `0x1` client and the
+grants above: today's production registry still names the client `nilx-one` and
+has no product block, so calls answer 401 or `bond_unlinked`. The rename and the
+grants are a precondition for enabling checkout.
+
+Development must use its own product grants, issuer and wallet. These endpoints
+alone do not deliver Telegram link reports, relay the purchase to 0x1, or
+activate checkout in any environment.
