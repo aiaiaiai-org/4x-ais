@@ -32,6 +32,8 @@ const PERMIT_TTL: u64 = 120;
 #[serde(deny_unknown_fields)]
 pub(crate) struct Link {
     subject: String,
+    // Required on purpose: a removal is an explicit `null`, never a missing
+    // field, so a truncated report cannot unlink a person by accident.
     #[serde(deserialize_with = "Deserialize::deserialize")]
     telegram_id: Option<i64>,
     revision: i64,

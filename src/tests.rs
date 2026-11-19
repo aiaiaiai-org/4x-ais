@@ -66,6 +66,10 @@ async fn app() -> Router {
         { "client_id": "0xda-market", "name": "0xda-market", "skin": "cell", "redirect_uris": [],
           "product": { "keys": [{ "kid": "m1", "x": public_key(MARKET_KEY) }],
                        "tokens": { "prism-hub": ["hub.call", "hub.events", "telegram.special.purchase"] } } },
+        // Holds the link scope but is not 0x1: tests the actor check.
+        { "client_id": "partner", "name": "Partner", "skin": "cell", "redirect_uris": [],
+          "product": { "keys": [{ "kid": "p1", "x": public_key(MARKET_KEY) }],
+                       "tokens": { "prism-hub": ["telegram.link.put"] } } },
         { "client_id": "prism-hub", "name": "Prism Hub", "skin": "slug", "redirect_uris": [],
           "product": { "keys": [{ "kid": "h1", "x": public_key(HUB_KEY) }],
                        "tokens": { "0xda-market": ["hub.relay"], "ais": ["pass.issue", "accounts.put", "link.read", "telegram.link.put", "telegram.special.purchase"] }, "relay": true } },
@@ -1757,10 +1761,10 @@ async fn telegram_purchase_requires_a_current_link_and_a_scoped_market() {
         "telegram.special.purchase",
     )
     .await;
-    let forged = hub_token_with_scope(
+    let ungranted = hub_token_with_scope(
         &app,
         "0xda-market",
-        "telegram-forged-link",
+        "telegram-ungranted-link",
         "telegram.link.put",
     )
     .await;
@@ -1777,7 +1781,7 @@ async fn telegram_purchase_requires_a_current_link_and_a_scoped_market() {
     let reply = post_json(
         &app,
         "/family/telegram-link",
-        &forged,
+        &ungranted,
         link(Some(987654321), 1),
     )
     .await;
@@ -1847,4 +1851,98 @@ async fn telegram_purchase_requires_a_current_link_and_a_scoped_market() {
     assert!(reply.body.contains("stale"));
     let reply = post_json(&app, "/family/telegram-purchase", &market, order).await;
     assert_eq!(reply.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_telegram_account_belongs_to_one_person_and_only_0x1_reports_it() {
+    let app = app().await;
+    let subject_of = |sub: &str| sub.to_owned();
+    let mut subs = Vec::new();
+    for (slug, n) in [("telegramfirst", 43_u32), ("telegramsecond", 44)] {
+        let (legacy, _) = person_in_both(&app, slug, n).await;
+        let pass_token =
+            hub_pass_token(&app, "nilx-one", &format!("telegram-owner-pass-{n}")).await;
+        let reply = ask_pass(
+            &app,
+            &pass_token,
+            serde_json::json!({ "subject": legacy, "audience": "0x1", "purpose": "claims" }),
+        )
+        .await;
+        let body: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
+        let (_, claims) = token_claims(body["pass"].as_str().unwrap());
+        subs.push(subject_of(claims["sub"].as_str().unwrap()));
+    }
+    let registrar =
+        hub_token_with_scope(&app, "0x1", "telegram-owner-reg-1", "telegram.link.put").await;
+    let partner =
+        hub_token_with_scope(&app, "partner", "telegram-partner-1", "telegram.link.put").await;
+    let link = |sub: &str, id: serde_json::Value, revision: i64| serde_json::json!({"subject": sub, "telegram_id": id, "revision": revision});
+
+    // A product with the scope that is not 0x1 cannot write a binding.
+    let reply = post_json(
+        &app,
+        "/family/telegram-link",
+        &partner,
+        link(&subs[0], 555.into(), 1),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::FORBIDDEN);
+    assert!(reply.body.contains("invalid_actor"));
+
+    // Removal is an explicit null: a report without the field is rejected.
+    let reply = post_json(
+        &app,
+        "/family/telegram-link",
+        &registrar,
+        serde_json::json!({"subject": subs[0], "revision": 1}),
+    )
+    .await;
+    assert!(reply.status.is_client_error(), "{}", reply.body);
+
+    // One Telegram account, one person.
+    let reply = post_json(
+        &app,
+        "/family/telegram-link",
+        &registrar,
+        link(&subs[0], 555.into(), 1),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK);
+    let reply = post_json(
+        &app,
+        "/family/telegram-link",
+        &registrar,
+        link(&subs[1], 555.into(), 1),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::CONFLICT);
+    assert!(reply.body.contains("account_taken"));
+
+    // A report older than the stored revision is stale, not a conflict.
+    let reply = post_json(
+        &app,
+        "/family/telegram-link",
+        &registrar,
+        link(&subs[0], 555.into(), 1),
+    )
+    .await;
+    assert!(reply.body.contains("stale"));
+
+    // After the first person disconnects, the account can move on.
+    let reply = post_json(
+        &app,
+        "/family/telegram-link",
+        &registrar,
+        link(&subs[0], serde_json::Value::Null, 2),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK);
+    let reply = post_json(
+        &app,
+        "/family/telegram-link",
+        &registrar,
+        link(&subs[1], 555.into(), 1),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK);
 }

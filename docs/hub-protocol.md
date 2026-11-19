@@ -148,6 +148,18 @@ result per requesting product and order ID, reject mismatched retries and
 return the original result for identical retries. The bot must only report a
 completed purchase after that result comes back.
 
+Trust boundary: AIS does not check that the Telegram user is present. It trusts
+the `telegram_id` the requesting product asserts, under that product's key and
+explicit grant. A compromised product key can obtain permits for any linked
+Telegram account, limited to this SKU. The limits are enforced by 0x1: the
+price check against the authoritative offer, one result per requesting product
+and order ID, and the current binding check.
+
+Both endpoints fail closed until the registry carries the `0x1` client and the
+grants above: today's production registry still names the client `nilx-one` and
+has no product block, so calls answer 401 or `bond_unlinked`. The rename and the
+grants are a precondition for enabling checkout.
+
 Development must use its own product grants, issuer and wallet. These endpoints
 alone do not deliver Telegram link reports, relay the purchase to 0x1, or
 activate checkout in any environment.
