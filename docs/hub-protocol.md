@@ -139,6 +139,11 @@ for the operation. The runtime registry must grant these scopes explicitly.
   `purchase+jwt` signed by AIS, addressed to 0x1, with its pairwise subject,
   Telegram ID, requesting product and the exact confirmed order terms.
 
+AIS trusts the authenticated product to attest the Telegram ID from a verified
+interaction. AIS does not independently prove that the person is present.
+Only a product explicitly granted this scope may request a permit, and that
+permit is limited to one Special SKU and its confirmed terms.
+
 A permit identifies the buyer and authorizes submission of these terms. It
 does not attest a price, balance, or completed payment. The receiving 0x1
 operation must verify the signature, issuer, audience, expiry, product and

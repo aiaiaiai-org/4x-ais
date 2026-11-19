@@ -1757,7 +1757,7 @@ async fn telegram_purchase_requires_a_current_link_and_a_scoped_market() {
         "telegram.special.purchase",
     )
     .await;
-    let forged = hub_token_with_scope(
+    let ungranted = hub_token_with_scope(
         &app,
         "0xda-market",
         "telegram-forged-link",
@@ -1777,11 +1777,20 @@ async fn telegram_purchase_requires_a_current_link_and_a_scoped_market() {
     let reply = post_json(
         &app,
         "/family/telegram-link",
-        &forged,
+        &ungranted,
         link(Some(987654321), 1),
     )
     .await;
     assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
+
+    let reply = post_json(
+        &app,
+        "/family/telegram-link",
+        &registrar,
+        serde_json::json!({ "subject": sub, "revision": 1 }),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::UNPROCESSABLE_ENTITY);
 
     let reply = post_json(&app, "/family/telegram-purchase", &market, order.clone()).await;
     assert_eq!(reply.status, StatusCode::NOT_FOUND);
