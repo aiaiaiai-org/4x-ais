@@ -1787,6 +1787,15 @@ async fn telegram_purchase_requires_a_current_link_and_a_scoped_market() {
     .await;
     assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
 
+    let reply = post_json(
+        &app,
+        "/family/telegram-link",
+        &registrar,
+        serde_json::json!({ "subject": sub, "revision": 1 }),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::UNPROCESSABLE_ENTITY);
+
     let reply = post_json(&app, "/family/telegram-purchase", &market, order.clone()).await;
     assert_eq!(reply.status, StatusCode::NOT_FOUND);
     assert!(reply.body.contains("telegram_unlinked"));
@@ -1888,16 +1897,6 @@ async fn a_telegram_account_belongs_to_one_person_and_only_0x1_reports_it() {
     .await;
     assert_eq!(reply.status, StatusCode::FORBIDDEN);
     assert!(reply.body.contains("invalid_actor"));
-
-    // Removal is an explicit null: a report without the field is rejected.
-    let reply = post_json(
-        &app,
-        "/family/telegram-link",
-        &registrar,
-        serde_json::json!({"subject": subs[0], "revision": 1}),
-    )
-    .await;
-    assert!(reply.status.is_client_error(), "{}", reply.body);
 
     // One Telegram account, one person.
     let reply = post_json(
