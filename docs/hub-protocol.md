@@ -148,6 +148,15 @@ result per requesting product and order ID, reject mismatched retries and
 return the original result for identical retries. The bot must only report a
 completed purchase after that result comes back.
 
+The wallet order key is not the raw `order_id`. AIS accepts a product-local ID
+of 1 to 128 bytes, while 0x1 settlement accepts 8 to 128 bytes and deduplicates
+on one ID. 0x1 must derive a bounded key from the verified `azp` and `order_id`
+under a checkout namespace, so short and maximum-length IDs both settle and the
+same local ID from two products cannot collide. Permits name audience `0x1` in
+every environment, so the receiver must pin its own environment's AIS issuer,
+signing keys and authorized product identities. A development permit must be
+rejected by production settlement.
+
 Trust boundary: AIS does not check that the Telegram user is present. It trusts
 the `telegram_id` the requesting product asserts, under that product's key and
 explicit grant. A compromised product key can obtain permits for any linked
