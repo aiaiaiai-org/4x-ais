@@ -62,6 +62,14 @@ CREATE TABLE IF NOT EXISTS family_links (
     PRIMARY KEY (subject, product),
     UNIQUE (product, account)
 ) STRICT;
+
+-- One verified Telegram account per person. A null account is a tombstone:
+-- delayed reports cannot restore an older link after a disconnect.
+CREATE TABLE IF NOT EXISTS telegram_links (
+    subject BLOB PRIMARY KEY NOT NULL REFERENCES identities(subject),
+    telegram_id INTEGER UNIQUE CHECK (telegram_id > 0),
+    revision INTEGER NOT NULL CHECK (revision > 0)
+) STRICT;
 ";
 
 #[derive(Debug, thiserror::Error)]
@@ -324,6 +332,44 @@ impl Store {
             label: row.get("label"),
             as_of: u64::try_from(row.get::<i64, _>("as_of")).unwrap_or_default(),
         }))
+    }
+
+    pub(crate) async fn put_telegram_link(
+        &self,
+        subject: &[u8; 32],
+        telegram_id: Option<i64>,
+        revision: i64,
+    ) -> Result<LinkReport, StoreError> {
+        let result = sqlx::query(
+            "INSERT INTO telegram_links (subject, telegram_id, revision) VALUES (?, ?, ?) \
+             ON CONFLICT (subject) DO UPDATE SET telegram_id = excluded.telegram_id, \
+             revision = excluded.revision WHERE excluded.revision > telegram_links.revision",
+        )
+        .bind(subject.as_slice())
+        .bind(telegram_id)
+        .bind(revision)
+        .execute(&self.pool)
+        .await;
+        match result {
+            Ok(done) if done.rows_affected() == 0 => Ok(LinkReport::Stale),
+            Ok(_) => Ok(LinkReport::Stored),
+            Err(sqlx::Error::Database(error)) if error.is_unique_violation() => {
+                Ok(LinkReport::AccountTaken)
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    pub(crate) async fn subject_for_telegram(
+        &self,
+        telegram_id: i64,
+    ) -> Result<Option<[u8; 32]>, StoreError> {
+        let row: Option<Vec<u8>> =
+            sqlx::query_scalar("SELECT subject FROM telegram_links WHERE telegram_id = ?")
+                .bind(telegram_id)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.and_then(|bytes| <[u8; 32]>::try_from(bytes).ok()))
     }
 
     /// Records a product assertion as spent. `false` when it already was.

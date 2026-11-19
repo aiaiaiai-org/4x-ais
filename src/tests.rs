@@ -55,7 +55,9 @@ async fn app() -> Router {
         // Staged successor: tests only. Production AIS_CLIENTS is unchanged
         // until Core can consume this signed continuity evidence.
         { "client_id": "0x1", "name": "0x1", "skin": "cell", "redirect_uris": [ONE_CALLBACK],
-          "pub_dress": true, "legacy_subject_client_id": "nilx-one" },
+          "pub_dress": true, "legacy_subject_client_id": "nilx-one",
+          "product": { "keys": [{ "kid": "o1", "x": public_key(ONE_KEY) }],
+                       "tokens": { "prism-hub": ["telegram.link.put"] } } },
         { "client_id": "prism", "name": "Prism", "skin": "slug", "redirect_uris": [PRISM_CALLBACK],
           "secret_sha256": hex_sha256(SECRET) },
         // A public client: no secret, only PKCE.
@@ -63,10 +65,10 @@ async fn app() -> Router {
         // Family products (hub.v1): keys and token grants, no secret.
         { "client_id": "0xda-market", "name": "0xda-market", "skin": "cell", "redirect_uris": [],
           "product": { "keys": [{ "kid": "m1", "x": public_key(MARKET_KEY) }],
-                       "tokens": { "prism-hub": ["hub.call", "hub.events"] } } },
+                       "tokens": { "prism-hub": ["hub.call", "hub.events", "telegram.special.purchase"] } } },
         { "client_id": "prism-hub", "name": "Prism Hub", "skin": "slug", "redirect_uris": [],
           "product": { "keys": [{ "kid": "h1", "x": public_key(HUB_KEY) }],
-                       "tokens": { "0xda-market": ["hub.relay"], "ais": ["pass.issue", "accounts.put", "link.read"] }, "relay": true } },
+                       "tokens": { "0xda-market": ["hub.relay"], "ais": ["pass.issue", "accounts.put", "link.read", "telegram.link.put", "telegram.special.purchase"] }, "relay": true } },
     ])
     .to_string();
     let config = Config::from_lookup(move |key| {
@@ -1236,7 +1238,10 @@ async fn a_product_gets_a_token_for_the_hub_with_its_own_key() {
     )
     .await;
     let body: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
-    assert_eq!(body["scope"], "hub.call hub.events");
+    assert_eq!(
+        body["scope"],
+        "hub.call hub.events telegram.special.purchase"
+    );
 }
 
 #[tokio::test]
@@ -1726,4 +1731,120 @@ async fn a_link_is_written_only_by_its_product_and_read_only_with_the_scope() {
     assert_eq!(reply.status, StatusCode::BAD_REQUEST);
     let reply = post_json(&app, "/family/link", &market, ask(&market_sub, "open-app")).await;
     assert_eq!(reply.status, StatusCode::BAD_REQUEST, "not a product");
+}
+
+#[tokio::test]
+async fn telegram_purchase_requires_a_current_link_and_a_scoped_market() {
+    let app = app().await;
+    let (legacy, _) = person_in_both(&app, "telegrambuyer", 41).await;
+    let pass_token = hub_pass_token(&app, "nilx-one", "telegram-person-pass-1").await;
+    let reply = ask_pass(
+        &app,
+        &pass_token,
+        serde_json::json!({ "subject": legacy, "audience": "0x1", "purpose": "claims" }),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let body: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
+    let (_, claims) = token_claims(body["pass"].as_str().unwrap());
+    let sub = claims["sub"].as_str().unwrap();
+    let registrar =
+        hub_token_with_scope(&app, "0x1", "telegram-register-tok", "telegram.link.put").await;
+    let market = hub_token_with_scope(
+        &app,
+        "0xda-market",
+        "telegram-market-tok",
+        "telegram.special.purchase",
+    )
+    .await;
+    let forged = hub_token_with_scope(
+        &app,
+        "0xda-market",
+        "telegram-forged-link",
+        "telegram.link.put",
+    )
+    .await;
+    let link = |id: Option<i64>, revision: i64| serde_json::json!({"subject": sub, "telegram_id": id, "revision": revision});
+    let order = serde_json::json!({
+        "telegram_id": 987654321,
+        "order_id": "market-order-1",
+        "sku": "0x1_special_1m",
+        "quantity": 1,
+        "price_id": 42,
+        "amount_minor": 640
+    });
+
+    let reply = post_json(
+        &app,
+        "/family/telegram-link",
+        &forged,
+        link(Some(987654321), 1),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
+
+    let reply = post_json(&app, "/family/telegram-purchase", &market, order.clone()).await;
+    assert_eq!(reply.status, StatusCode::NOT_FOUND);
+    assert!(reply.body.contains("telegram_unlinked"));
+
+    let reply = post_json(
+        &app,
+        "/family/telegram-link",
+        &registrar,
+        link(Some(987654321), 1),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK);
+    let reply = post_json(
+        &app,
+        "/family/accounts",
+        &registrar,
+        serde_json::json!({
+            "subject": sub, "account": "bond-telegram", "pub_dress": "0xftelegrambuyer",
+            "as_of": unix_now()
+        }),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
+    let account = hub_token_with_scope(&app, "0x1", "telegram-account-tok", "accounts.put").await;
+    let reply = post_json(
+        &app,
+        "/family/accounts",
+        &account,
+        serde_json::json!({
+            "subject": sub, "account": "bond-telegram", "pub_dress": "0xftelegrambuyer",
+            "as_of": unix_now()
+        }),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+
+    let mut wrong = order.clone();
+    wrong["quantity"] = 2.into();
+    let reply = post_json(&app, "/family/telegram-purchase", &market, wrong).await;
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+    let reply = post_json(&app, "/family/telegram-purchase", &market, order.clone()).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let body: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
+    let (header, claims) = token_claims(body["permit"].as_str().unwrap());
+    assert_eq!(header["typ"], "purchase+jwt");
+    assert_eq!(claims["sub"], sub);
+    assert_eq!(claims["aud"], "0x1");
+    assert_eq!(claims["azp"], "0xda-market");
+    assert_eq!(claims["order_id"], "market-order-1");
+    assert_eq!(claims["price_id"], 42);
+    assert_eq!(claims["amount_minor"], 640);
+
+    let reply = post_json(&app, "/family/telegram-link", &registrar, link(None, 2)).await;
+    assert_eq!(reply.status, StatusCode::OK);
+    let reply = post_json(
+        &app,
+        "/family/telegram-link",
+        &registrar,
+        link(Some(987654321), 1),
+    )
+    .await;
+    assert!(reply.body.contains("stale"));
+    let reply = post_json(&app, "/family/telegram-purchase", &market, order).await;
+    assert_eq!(reply.status, StatusCode::NOT_FOUND);
 }
