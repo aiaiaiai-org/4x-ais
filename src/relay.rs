@@ -107,3 +107,68 @@ pub(crate) fn caller(
         asker,
     })
 }
+
+/// The exact product using a service-issued token for itself, **not** a
+/// delegated Prism relay. Keep this separate from \`caller\`: relay tokens
+/// require an \`act\` claim, but direct product tokens must never carry one.
+pub(crate) fn direct_product(
+    state: &AppState,
+    headers: &HeaderMap,
+    now: u64,
+    scope: &str,
+    expected_client: &str,
+) -> bool {
+    let Some(token) = headers
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .filter(|value| value.len() <= MAX_TOKEN_BYTES)
+    else {
+        return false;
+    };
+    let mut parts = token.split('.');
+    let (Some(header), Some(payload), Some(signature), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return false;
+    };
+    let Some(header) = decode::<TokenHeader>(header) else {
+        return false;
+    };
+    if header.alg != "EdDSA" || header.typ != "at+jwt" || header.kid != state.config.key_id {
+        return false;
+    }
+    let Some(signature) = URL_SAFE_NO_PAD
+        .decode(signature)
+        .ok()
+        .and_then(|value| Signature::from_slice(&value).ok())
+    else {
+        return false;
+    };
+    let Some(signed) = token.rsplit_once('.').map(|(signed, _)| signed) else {
+        return false;
+    };
+    if state
+        .config
+        .signing_key
+        .verifying_key()
+        .verify_strict(signed.as_bytes(), &signature)
+        .is_err()
+    {
+        return false;
+    }
+    let Some(claims) = decode::<TokenClaims>(payload) else {
+        return false;
+    };
+    claims.iss == state.config.issuer_id()
+        && claims.aud == AIS_AUDIENCE
+        && claims.exp > now
+        && claims.sub == expected_client
+        && claims.act.is_none()
+        && claims.scope.split(' ').any(|held| held == scope)
+        && state
+            .config
+            .clients
+            .get(expected_client)
+            .is_some_and(|client| client.product.is_some())
+}
