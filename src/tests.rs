@@ -57,7 +57,7 @@ async fn app() -> Router {
         { "client_id": "0x1", "name": "0x1", "skin": "cell", "redirect_uris": [ONE_CALLBACK],
           "pub_dress": true, "legacy_subject_client_id": "nilx-one",
           "product": { "keys": [{ "kid": "o1", "x": public_key(ONE_KEY) }],
-                       "tokens": { "prism-hub": ["telegram.link.put"] } } },
+                       "tokens": { "prism-hub": ["telegram.link.put"], "ais": ["telegram.identity.resolve"] } } },
         { "client_id": "prism", "name": "Prism", "skin": "slug", "redirect_uris": [PRISM_CALLBACK],
           "secret_sha256": hex_sha256(SECRET) },
         // A public client: no secret, only PKCE.
@@ -1944,4 +1944,132 @@ async fn a_telegram_account_belongs_to_one_person_and_only_0x1_reports_it() {
     )
     .await;
     assert_eq!(reply.status, StatusCode::OK);
+}
+
+// ---------------------------------------------------------------------------
+// Telegram provider evidence for the Core-owned product Gateway.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn telegram_identity_proof_requires_direct_scoped_token_and_existing_bond() {
+    let app = app().await;
+    let (legacy, _) = person_in_both(&app, "tgidentity", 66).await;
+    let pass = hub_pass_token(&app, "nilx-one", "tgidentity-pass-01").await;
+    let reply = ask_pass(
+        &app,
+        &pass,
+        serde_json::json!({ "subject": legacy, "audience": "0x1", "purpose": "claims" }),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let raw: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
+    let (_, claims) = token_claims(raw["pass"].as_str().unwrap());
+    let sub = claims["sub"].as_str().unwrap();
+
+    // The direct AIS token uses a product key, no shared HMAC or Bot Token.
+    let assertion = product_assertion(ONE_KEY, "o1", "0x1", "telegram-direct-proof-01");
+    let token = ask_product_token(
+        &app,
+        &[
+            ("client_assertion", &assertion),
+            ("client_id", "0x1"),
+            ("audience", "ais"),
+            ("scope", "telegram.identity.resolve"),
+        ],
+    )
+    .await;
+    assert_eq!(token.status, StatusCode::OK, "{}", token.body);
+    let payload: serde_json::Value = serde_json::from_str(&token.body).unwrap();
+    let token = payload["access_token"].as_str().unwrap();
+    let nonce = "abcdefghijklmnopABCDEFGHIJKLMNOP";
+    let request = serde_json::json!({ "telegram_id": 656565, "nonce": nonce });
+
+    // Even with a valid service credential, no provider link means no proof.
+    let missing = post_json(&app, "/family/telegram-identity", token, request.clone()).await;
+    assert_eq!(missing.status, StatusCode::NOT_FOUND);
+    assert!(missing.body.contains("telegram_unlinked"));
+
+    // Record a linked Telegram provider and its *existing* 0x1 product account.
+    let registrar = hub_token_with_scope(&app, "0x1", "tgidentity-register-01", "telegram.link.put").await;
+    let recorded = post_json(
+        &app,
+        "/family/telegram-link",
+        &registrar,
+        serde_json::json!({ "subject": sub, "telegram_id": 656565, "revision": 1 }),
+    )
+    .await;
+    assert_eq!(recorded.status, StatusCode::OK, "{}", recorded.body);
+    let missing_bond = post_json(&app, "/family/telegram-identity", token, request.clone()).await;
+    assert_eq!(missing_bond.status, StatusCode::NOT_FOUND);
+    assert!(missing_bond.body.contains("bond_unlinked"));
+
+    let account = hub_token_with_scope(&app, "0x1", "tgidentity-account-01", "accounts.put").await;
+    let recorded = post_json(
+        &app,
+        "/family/accounts",
+        &account,
+        serde_json::json!({
+            "subject": sub,
+            "account": "bond-tg-identity",
+            "pub_dress": "0xftgidentity",
+            "as_of": unix_now()
+        }),
+    )
+    .await;
+    assert_eq!(recorded.status, StatusCode::OK, "{}", recorded.body);
+
+    let proof = post_json(&app, "/family/telegram-identity", token, request.clone()).await;
+    assert_eq!(proof.status, StatusCode::OK, "{}", proof.body);
+    assert_eq!(proof.headers[header::CACHE_CONTROL], "no-store");
+    assert!(!proof.body.contains("656565"), "no raw Telegram ID in response");
+    let body: serde_json::Value = serde_json::from_str(&proof.body).unwrap();
+    assert_eq!(body["expires_in"], 120);
+    assert!(body.get("session").is_none(), "proof cannot open a Core session");
+    let signed = body["proof"].as_str().unwrap();
+    let (header, claims) = token_claims(signed);
+    assert_eq!(header["typ"], "provider-evidence+jwt");
+    assert_eq!(claims["aud"], "0x1");
+    assert_eq!(claims["azp"], "0x1");
+    assert_eq!(claims["provider"], "telegram");
+    assert_eq!(claims["purpose"], "telegram.identity.resolve");
+    assert_eq!(claims["nonce"], nonce);
+    assert_eq!(claims["sub"], sub);
+    assert!(claims.get("telegram_id").is_none());
+    assert!(claims.get("active_client").is_none());
+    assert!(claims["exp"].as_u64().unwrap() > unix_now());
+
+    let jwks: serde_json::Value =
+        serde_json::from_str(&send(&app, get("/.well-known/jwks.json")).await.body).unwrap();
+    let key = ed25519_dalek::VerifyingKey::from_bytes(
+        &base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(jwks["keys"][0]["x"].as_str().unwrap())
+            .unwrap()
+            .try_into()
+            .unwrap(),
+    )
+    .unwrap();
+    let (message, signature) = signed.rsplit_once('.').unwrap();
+    let signature = ed25519_dalek::Signature::from_slice(
+        &base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(signature)
+            .unwrap(),
+    )
+    .unwrap();
+    key.verify_strict(message.as_bytes(), &signature).unwrap();
+
+    // A Prism relay or absent credential can never use this direct product route.
+    let relay = hub_token_with_scope(&app, "0x1", "tgidentity-relay-01", "telegram.link.put").await;
+    for invalid in ["", relay.as_str(), "invalid"] {
+        let response =
+            post_json(&app, "/family/telegram-identity", invalid, request.clone()).await;
+        assert_eq!(response.status, StatusCode::UNAUTHORIZED);
+    }
+    let invalid_request = post_json(
+        &app,
+        "/family/telegram-identity",
+        token,
+        serde_json::json!({ "telegram_id": 656565, "nonce": "short" }),
+    )
+    .await;
+    assert_eq!(invalid_request.status, StatusCode::BAD_REQUEST);
 }
