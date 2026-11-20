@@ -144,6 +144,6 @@ mod tests {
     fn evidence_scope_and_lifetime_are_narrow() {
         assert_eq!(TARGET, "0x1");
         assert_eq!(SCOPE, "telegram.identity.resolve");
-        assert!(EVIDENCE_TTL <= 120);
+        assert_eq!(EVIDENCE_TTL, 120);
     }
 }
