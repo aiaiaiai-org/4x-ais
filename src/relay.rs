@@ -109,8 +109,8 @@ pub(crate) fn caller(
 }
 
 /// The exact product using a service-issued token for itself, **not** a
-/// delegated Prism relay. Keep this separate from \`caller\`: relay tokens
-/// require an \`act\` claim, but direct product tokens must never carry one.
+/// delegated Prism relay. Keep this separate from `caller`: relay tokens
+/// require an `act` claim, but direct product tokens must never carry one.
 pub(crate) fn direct_product(
     state: &AppState,
     headers: &HeaderMap,
