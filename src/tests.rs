@@ -1990,7 +1990,8 @@ async fn telegram_identity_proof_requires_direct_scoped_token_and_existing_bond(
     assert!(missing.body.contains("telegram_unlinked"));
 
     // Record a linked Telegram provider and its *existing* 0x1 product account.
-    let registrar = hub_token_with_scope(&app, "0x1", "tgidentity-register-01", "telegram.link.put").await;
+    let registrar =
+        hub_token_with_scope(&app, "0x1", "tgidentity-register-01", "telegram.link.put").await;
     let recorded = post_json(
         &app,
         "/family/telegram-link",
@@ -2021,10 +2022,16 @@ async fn telegram_identity_proof_requires_direct_scoped_token_and_existing_bond(
     let proof = post_json(&app, "/family/telegram-identity", token, request.clone()).await;
     assert_eq!(proof.status, StatusCode::OK, "{}", proof.body);
     assert_eq!(proof.headers[header::CACHE_CONTROL], "no-store");
-    assert!(!proof.body.contains("656565"), "no raw Telegram ID in response");
+    assert!(
+        !proof.body.contains("656565"),
+        "no raw Telegram ID in response"
+    );
     let body: serde_json::Value = serde_json::from_str(&proof.body).unwrap();
     assert_eq!(body["expires_in"], 120);
-    assert!(body.get("session").is_none(), "proof cannot open a Core session");
+    assert!(
+        body.get("session").is_none(),
+        "proof cannot open a Core session"
+    );
     let signed = body["proof"].as_str().unwrap();
     let (header, claims) = token_claims(signed);
     assert_eq!(header["typ"], "provider-evidence+jwt");
@@ -2060,8 +2067,7 @@ async fn telegram_identity_proof_requires_direct_scoped_token_and_existing_bond(
     // A Prism relay or absent credential can never use this direct product route.
     let relay = hub_token_with_scope(&app, "0x1", "tgidentity-relay-01", "telegram.link.put").await;
     for invalid in ["", relay.as_str(), "invalid"] {
-        let response =
-            post_json(&app, "/family/telegram-identity", invalid, request.clone()).await;
+        let response = post_json(&app, "/family/telegram-identity", invalid, request.clone()).await;
         assert_eq!(response.status, StatusCode::UNAUTHORIZED);
     }
     let invalid_request = post_json(
