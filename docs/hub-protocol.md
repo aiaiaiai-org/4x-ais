@@ -106,6 +106,62 @@ On top of sign-in ([service design](service-design.md)) it adds:
 6. **The AIS-owned identity outbox** (first-release scope): `identity.created`,
    `identity.prefix_changed`, `identity.deleted`, delivered to the hub.
 
+## Authority verification and BondChain boundary (proposed)
+
+**One AIS, no second authority service.** Authority and delegation verification
+are responsibilities to develop within `4x-ais`, using its existing identity
+and family-link boundaries. They are **not** a deployed generalized Bond
+signing/authorization API merely because the existing product tokens and
+person passes work.
+
+AIS MAY issue narrowly scoped, signed attestations about a verified identity's
+Bond-key binding, authorized active signing device or delegated Business Bond
+representative **only after** the corresponding product and business authority
+contracts define their source of truth, key lifecycle, subject binding, issuer,
+audience, operation, key epoch, expiry, revocation and replay behavior.
+Such attestations MUST NOT independently grant authority that the owning
+product or Bond contract has not established. AIS remains a source of identity
+evidence; it cannot infer a Bond's cryptographic signing key from Telegram
+`initData`, an OIDC session or a product token.
+
+The distinctions are deliberate:
+
+- **Authentication:** which person/product authenticated in the AIS scope.
+- **Authorization/authority:** which product operation or Bond-representative
+  capacity is valid for the exact subject, under the owning contract.
+- **Commitment:** an authorized Bond (or valid Business Bond representative)
+  signs an exact canonical Interaction action using the permitted signer.
+- **Completion:** each participating `nilx-one/core` independently verifies
+  the contract-required reciprocal actions and result evidence. No AIS
+  `close` endpoint, central Chain signature or operator-owned relationship
+  history is permitted.
+
+AIS MUST NOT custody human `sk_bond`, generate a missing counterparty
+signature, sign a terminal `bond.chain` in place of either Bond, or treat
+a product's `verified` claim as proof of human consent. A BBond service's
+product token proves its service identity, **not** representative authority.
+
+AIS generally needs the minimum operation, subject, audience, authority
+metadata and canonical action digest necessary to evaluate a specifically
+defined authority contract. A complete Intent body, private counterpart
+payload or full pairwise Chain MUST NOT be retained as an identity artifact.
+An attestation MAY be reused only within its exact audience, purpose and
+validity limits; it MUST NOT become an unrestricted cross-product pass.
+
+Under the current `hub.v1` topology, product tokens and OIDC bootstrap
+still come directly from AIS. Ordinary product queries for additional
+identity/authority evidence MUST be routed through Prism transit using
+a product token and specific target/operation grants. Transit MUST verify
+AIS issuer signatures locally where the token contract permits; it MUST NOT
+accept a literal `verified: true` field as a substitute. No general
+per-Interaction request to AIS is required merely to validate an
+already-verifiable, in-scope attestation.
+
+This contract boundary does **not** enable new Bond-key registration,
+delegated business signing, automatic purchase completion, or any new
+production endpoint. Their exact schemas and enforcement remain explicit
+future implementation work in the respective owning contracts.
+
 ## One identifier per product
 
 The 0x1 client is registered as `0x1`, the same identifier the orders already
