@@ -115,10 +115,9 @@ trap 'rm -f "$next_env"' EXIT HUP INT TERM
   printf 'AIS_SIGNING_KEY=%s\n' "$signing_key"
   printf 'AIS_SECRET=%s\n' "$secret"
   printf 'AIS_PASSWORD_PEPPER=%s\n' "$pepper"
-  # 0x1 is a public client: no secret, only PKCE and exact callbacks.
-  # `0x1` is the successor of `nilx-one`: it keeps the browser callback, adds
-  # only the Telegram login callback and carries signed subject continuity.
-  printf 'AIS_CLIENTS=%s\n' '[{"client_id":"nilx-one","name":"0x1","skin":"cell","redirect_uris":["https://nilx.one/api/v1/auth/aiaiaiai/callback"],"pub_dress":true},{"client_id":"0x1","name":"0x1","skin":"cell","redirect_uris":["https://nilx.one/api/v1/auth/aiaiaiai/callback","https://nilx.one/api/v1/telegram/login/callback"],"pub_dress":true,"legacy_subject_client_id":"nilx-one"}]'
+  # 0x1 is a public client: no secret, only PKCE and exact callbacks: the
+  # browser sign-in and the Telegram login.
+  printf 'AIS_CLIENTS=%s\n' '[{"client_id":"0x1","name":"0x1","skin":"cell","redirect_uris":["https://nilx.one/api/v1/auth/aiaiaiai/callback","https://nilx.one/api/v1/telegram/login/callback"],"pub_dress":true}]'
 } >"$next_env"
 chmod 0600 "$next_env"
 mv "$next_env" "$runtime_env"

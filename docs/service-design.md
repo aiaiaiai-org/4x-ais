@@ -149,11 +149,9 @@ the host binds that transaction to verified provider evidence and exchanges
 and verifies the OIDC result server-side. No authorization code, browser
 cookie, bearer token, or signing key goes to a chat message.
 
-This route does **not** register the `0x1` client in production or switch
-existing `nilx-one` subjects. The dedicated `0x1` client remains staged
-pending signed subject-continuity mapping and migration acceptance. Until
-those gates are satisfied, an unregistered client correctly receives a
-failure even for an otherwise valid scoped entry.
+The production registry names only the `0x1` client; the retired
+`nilx-one` client had no subjects to switch. An unregistered client still
+receives a failure even for an otherwise valid scoped entry.
 
 ## Cross-service: no tunnel
 
