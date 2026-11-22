@@ -76,10 +76,11 @@ set of secrets and a service whose every identifier has changed.
   successor subjects came from the same private AIS identity, rather than
   treating a matching public address as proof. The regular `sub` remains
   pairwise and distinct across the two clients; other products receive no
-  continuity claim. The current production registry continues using
-  `nilx-one`; the new entry is deliberately **not** added to
-  `deploy/prepare-runtime-env.sh` yet. Core acceptance and a separate
-  reviewed rollout are required before enabling the successor.
+  continuity claim. The production registry in
+  `deploy/prepare-runtime-env.sh` keeps `nilx-one` and registers `0x1` beside
+  it, with both callbacks. Registration opens no product session by itself:
+  the 0x1 host must still verify the provider link and the original
+  sender's confirmation before it acts on a Telegram callback.
 - **`secret_sha256`** is optional. A client that has none is a **public
   client**: it holds no secret and names itself with `client_id` at `/token`.
   What binds its code to it is PKCE (S256, required of every client) and the

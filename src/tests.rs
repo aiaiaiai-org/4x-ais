@@ -56,8 +56,7 @@ async fn app() -> Router {
         { "client_id": "nilx-one", "name": "0x1", "skin": "cell", "redirect_uris": [ONE_CALLBACK],
           "secret_sha256": hex_sha256(SECRET), "pub_dress": true,
           "product": { "keys": [{ "kid": "o1", "x": public_key(ONE_KEY) }] } },
-        // Staged successor: tests only. Production AIS_CLIENTS is unchanged
-        // until Core can consume this signed continuity evidence.
+        // The successor, as in production, plus test-only product grants.
         { "client_id": "0x1", "name": "0x1", "skin": "cell", "redirect_uris": [ONE_CALLBACK, TELEGRAM_CALLBACK],
           "pub_dress": true, "legacy_subject_client_id": "nilx-one",
           "product": { "keys": [{ "kid": "o1", "x": public_key(ONE_KEY) }],

@@ -96,6 +96,23 @@ fn the_host_script_writes_an_environment_the_service_accepts() {
         ["https://nilx.one/api/v1/auth/aiaiaiai/callback"]
     );
 
+    // Its successor keeps that callback, adds only the Telegram one and
+    // proves subject continuity from it.
+    let successor = &config.clients["0x1"];
+    assert_eq!(successor.secret_sha256, None);
+    assert!(successor.pub_dress_scope);
+    assert_eq!(
+        successor.legacy_subject_client_id.as_deref(),
+        Some("nilx-one")
+    );
+    assert_eq!(
+        successor.redirect_uris,
+        [
+            "https://nilx.one/api/v1/auth/aiaiaiai/callback",
+            crate::config::TELEGRAM_CALLBACK,
+        ]
+    );
+
     // The secrets are the host's alone: private files, independent values.
     let secrets = directory.path().join("secrets");
     assert_eq!(
