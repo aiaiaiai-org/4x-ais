@@ -22,6 +22,7 @@ use crate::{config::Config, router, store::Store};
 const ISSUER: &str = "https://auth.aiaiaiai.org";
 const HOST_NAME: &str = "auth.aiaiaiai.org";
 const ONE_CALLBACK: &str = "https://nilx.one/api/v1/auth/aiaiaiai/callback";
+const TELEGRAM_CALLBACK: &str = "https://nilx.one/api/v1/telegram/login/callback";
 const PRISM_CALLBACK: &str = "https://prism.aiaiaiai.org/auth/callback";
 const OPEN_CALLBACK: &str = "https://open.example/auth/callback";
 const SECRET: &str = "a-client-secret-of-thirty-two-bytes!";
@@ -54,7 +55,7 @@ async fn app() -> Router {
           "product": { "keys": [{ "kid": "o1", "x": public_key(ONE_KEY) }] } },
         // Staged successor: tests only. Production AIS_CLIENTS is unchanged
         // until Core can consume this signed continuity evidence.
-        { "client_id": "0x1", "name": "0x1", "skin": "cell", "redirect_uris": [ONE_CALLBACK],
+        { "client_id": "0x1", "name": "0x1", "skin": "cell", "redirect_uris": [ONE_CALLBACK, TELEGRAM_CALLBACK],
           "pub_dress": true, "legacy_subject_client_id": "nilx-one",
           "product": { "keys": [{ "kid": "o1", "x": public_key(ONE_KEY) }],
                        "tokens": { "prism-hub": ["telegram.link.put"], "ais": ["telegram.identity.resolve"] } } },
@@ -732,7 +733,7 @@ async fn the_0x1_successor_token_proves_continuity_without_reusing_the_old_audie
     let app = app().await;
     let (legacy, created) = register_cell(&app, "0", "continuity").await;
     let old = legacy.verified(&app, &created).await.unwrap();
-    let successor = open(&app, "0x1", ONE_CALLBACK, None).await;
+    let successor = open(&app, "0x1", TELEGRAM_CALLBACK, None).await;
     let signed_in = successor
         .post(
             &app,
@@ -757,6 +758,9 @@ async fn the_0x1_successor_token_proves_continuity_without_reusing_the_old_audie
             .unwrap(),
     )
     .unwrap();
+    let mut redirect = back;
+    redirect.set_query(None);
+    assert_eq!(redirect.as_str(), TELEGRAM_CALLBACK);
     assert_eq!(claims["aud"], "0x1");
     assert_ne!(claims["sub"], old.subject);
     assert_eq!(claims["subject_continuity"]["from_client_id"], "nilx-one");

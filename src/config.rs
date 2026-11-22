@@ -209,22 +209,22 @@ fn parse_clients(value: &str) -> Result<HashMap<String, Client>, ConfigError> {
         }
     }
     // Continuity is not a general-purpose alias mechanism: the only
-    // allowed migration is nilx-one -> 0x1 with an identical redirect and
-    // public address scope. The old client remains registered for coexistence.
+    // allowed migration is nilx-one -> 0x1. The old callbacks must remain
+    // registered, and only the dedicated Telegram callback may be added.
     for client in clients.values() {
         if let Some(legacy) = &client.legacy_subject_client_id {
             let source = clients.get(legacy);
             if client.client_id != "0x1"
                 || legacy != "nilx-one"
                 || source.is_none_or(|source| {
-                    source.redirect_uris != client.redirect_uris
+                    !continuity_redirects_match(&source.redirect_uris, &client.redirect_uris)
                         || source.skin != client.skin
                         || !source.pub_dress_scope
                         || !client.pub_dress_scope
                 })
             {
                 return Err(ConfigError::Clients(
-                    "0x1 continuity requires a registered nilx-one client with matching redirect, skin and pub_dress scope".into(),
+                    "0x1 continuity requires a registered nilx-one client with the same redirects in the same order (plus only the Telegram callback), matching skin and pub_dress scope".into(),
                 ));
             }
         }
@@ -256,6 +256,23 @@ fn parse_clients(value: &str) -> Result<HashMap<String, Client>, ConfigError> {
         ));
     }
     Ok(clients)
+}
+
+fn continuity_redirects_match(legacy: &[String], successor: &[String]) -> bool {
+    // Owned by the 0x1 host: nilx-one/core `CALLBACK_PATH` in
+    // crates/nilxone-identity/src/public_info/telegram_login.rs and
+    // docs/runtime.md must change together with this value.
+    const TELEGRAM_CALLBACK: &str = "https://nilx.one/api/v1/telegram/login/callback";
+
+    if legacy == successor {
+        return true;
+    }
+    !legacy.iter().any(|uri| uri == TELEGRAM_CALLBACK)
+        && legacy.len().checked_add(1) == Some(successor.len())
+        && successor
+            .iter()
+            .filter(|uri| uri.as_str() != TELEGRAM_CALLBACK)
+            .eq(legacy.iter())
 }
 
 impl TryFrom<ClientRecord> for Client {
@@ -431,6 +448,16 @@ mod tests {
         assert_eq!(config.clients["nilx-one"].legacy_subject_client_id, None);
         for malformed in [
             serde_json::json!([pair[1]]),
+            serde_json::json!([pair[0], {
+                "client_id": "0x1", "name": "0x1", "skin": "cell",
+                "redirect_uris": ["https://nilx.one/cb", "https://nilx.one/another/callback"],
+                "pub_dress": true, "legacy_subject_client_id": "nilx-one"
+            }]),
+            serde_json::json!([pair[0], {
+                "client_id": "0x1", "name": "0x1", "skin": "cell",
+                "redirect_uris": ["https://nilx.one/api/v1/telegram/login/callback"],
+                "pub_dress": true, "legacy_subject_client_id": "nilx-one"
+            }]),
             serde_json::json!([pair[0], {
                 "client_id": "0x1", "name": "0x1", "skin": "cell",
                 "redirect_uris": ["https://evil.example/cb"], "pub_dress": true,
