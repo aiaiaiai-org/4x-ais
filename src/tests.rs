@@ -17,15 +17,14 @@ use sha2::{Digest as _, Sha256};
 use tower::ServiceExt as _;
 use url::Url;
 
-use crate::{
-    config::{Config, TELEGRAM_CALLBACK},
-    router,
-    store::Store,
-};
+use crate::{config::Config, router, store::Store};
 
 const ISSUER: &str = "https://auth.aiaiaiai.org";
 const HOST_NAME: &str = "auth.aiaiaiai.org";
 const ONE_CALLBACK: &str = "https://nilx.one/api/v1/auth/aiaiaiai/callback";
+/// The 0x1 host's Telegram login callback: nilx-one/core `CALLBACK_PATH` in
+/// crates/nilxone-identity/src/public_info/telegram_login.rs.
+pub(crate) const TELEGRAM_CALLBACK: &str = "https://nilx.one/api/v1/telegram/login/callback";
 const PRISM_CALLBACK: &str = "https://prism.aiaiaiai.org/auth/callback";
 const OPEN_CALLBACK: &str = "https://open.example/auth/callback";
 const SECRET: &str = "a-client-secret-of-thirty-two-bytes!";
@@ -56,9 +55,9 @@ async fn app() -> Router {
         { "client_id": "nilx-one", "name": "0x1", "skin": "cell", "redirect_uris": [ONE_CALLBACK],
           "secret_sha256": hex_sha256(SECRET), "pub_dress": true,
           "product": { "keys": [{ "kid": "o1", "x": public_key(ONE_KEY) }] } },
-        // The successor, as in production, plus test-only product grants.
+        // 0x1 as in production, plus test-only product grants.
         { "client_id": "0x1", "name": "0x1", "skin": "cell", "redirect_uris": [ONE_CALLBACK, TELEGRAM_CALLBACK],
-          "pub_dress": true, "legacy_subject_client_id": "nilx-one",
+          "pub_dress": true,
           "product": { "keys": [{ "kid": "o1", "x": public_key(ONE_KEY) }],
                        "tokens": { "prism-hub": ["telegram.link.put"], "ais": ["telegram.identity.resolve"] } } },
         { "client_id": "prism", "name": "Prism", "skin": "slug", "redirect_uris": [PRISM_CALLBACK],
@@ -731,7 +730,7 @@ async fn a_client_cannot_choose_its_own_limit_key() {
 }
 
 #[tokio::test]
-async fn the_0x1_successor_token_proves_continuity_without_reusing_the_old_audience() {
+async fn the_0x1_token_on_the_telegram_callback_has_its_own_subject_and_no_alias() {
     let app = app().await;
     let (legacy, created) = register_cell(&app, "0", "continuity").await;
     let old = legacy.verified(&app, &created).await.unwrap();
@@ -765,8 +764,7 @@ async fn the_0x1_successor_token_proves_continuity_without_reusing_the_old_audie
     assert_eq!(redirect.as_str(), TELEGRAM_CALLBACK);
     assert_eq!(claims["aud"], "0x1");
     assert_ne!(claims["sub"], old.subject);
-    assert_eq!(claims["subject_continuity"]["from_client_id"], "nilx-one");
-    assert_eq!(claims["subject_continuity"]["sub"], old.subject);
+    assert!(claims.get("subject_continuity").is_none());
     let keys: JsonWebKeySet =
         serde_json::from_str(&send(&app, get("/.well-known/jwks.json")).await.body).unwrap();
     let now = std::time::SystemTime::now()

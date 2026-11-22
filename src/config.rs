@@ -58,10 +58,6 @@ struct ClientRecord {
     secret_sha256: Option<String>,
     #[serde(default)]
     pub_dress: bool,
-    /// Deliberately restricted to 0x1 taking over nilx-one; a signed
-    /// continuation proof does not merge arbitrary product identities.
-    #[serde(default)]
-    legacy_subject_client_id: Option<String>,
     /// Present for a family product that may ask for product tokens.
     #[serde(default)]
     product: Option<ProductRecord>,
@@ -99,9 +95,6 @@ pub struct Client {
     /// redirect URI are what bind a code to it.
     pub secret_sha256: Option<[u8; 32]>,
     pub pub_dress_scope: bool,
-    /// Enables issuer-signed continuity evidence for the exact same person.
-    /// No other client's pairwise subject may be disclosed.
-    pub legacy_subject_client_id: Option<String>,
     /// `Some` for a family product: its keys and token grants.
     pub product: Option<Product>,
 }
@@ -208,27 +201,6 @@ fn parse_clients(value: &str) -> Result<HashMap<String, Client>, ConfigError> {
             return Err(ConfigError::Clients("duplicate client_id".into()));
         }
     }
-    // Continuity is not a general-purpose alias mechanism: the only
-    // allowed migration is nilx-one -> 0x1. The old callbacks must remain
-    // registered, and only the dedicated Telegram callback may be added.
-    for client in clients.values() {
-        if let Some(legacy) = &client.legacy_subject_client_id {
-            let source = clients.get(legacy);
-            if client.client_id != "0x1"
-                || legacy != "nilx-one"
-                || source.is_none_or(|source| {
-                    !continuity_redirects_match(&source.redirect_uris, &client.redirect_uris)
-                        || source.skin != client.skin
-                        || !source.pub_dress_scope
-                        || !client.pub_dress_scope
-                })
-            {
-                return Err(ConfigError::Clients(
-                    "0x1 continuity requires a registered nilx-one client with the same redirects in the same order (plus only the Telegram callback), matching skin and pub_dress scope".into(),
-                ));
-            }
-        }
-    }
     // A product may ask for tokens only to other registered products.
     for client in clients.values() {
         let Some(product) = &client.product else {
@@ -256,24 +228,6 @@ fn parse_clients(value: &str) -> Result<HashMap<String, Client>, ConfigError> {
         ));
     }
     Ok(clients)
-}
-
-/// The only callback the 0x1 successor may add to its predecessor's.
-/// Owned by the 0x1 host: nilx-one/core `CALLBACK_PATH` in
-/// crates/nilxone-identity/src/public_info/telegram_login.rs and
-/// docs/runtime.md must change together with this value.
-pub(crate) const TELEGRAM_CALLBACK: &str = "https://nilx.one/api/v1/telegram/login/callback";
-
-fn continuity_redirects_match(legacy: &[String], successor: &[String]) -> bool {
-    if legacy == successor {
-        return true;
-    }
-    !legacy.iter().any(|uri| uri == TELEGRAM_CALLBACK)
-        && legacy.len().checked_add(1) == Some(successor.len())
-        && successor
-            .iter()
-            .filter(|uri| uri.as_str() != TELEGRAM_CALLBACK)
-            .eq(legacy.iter())
 }
 
 impl TryFrom<ClientRecord> for Client {
@@ -324,7 +278,6 @@ impl TryFrom<ClientRecord> for Client {
             redirect_uris: record.redirect_uris,
             secret_sha256,
             pub_dress_scope: record.pub_dress,
-            legacy_subject_client_id: record.legacy_subject_client_id,
             product,
         })
     }
@@ -433,53 +386,18 @@ mod tests {
     }
 
     #[test]
-    fn continuity_is_only_for_the_exact_0x1_client_successor() {
-        let pair = serde_json::json!([
-            { "client_id": "nilx-one", "name": "0x1 legacy", "skin": "cell",
-              "redirect_uris": ["https://nilx.one/cb"], "pub_dress": true },
+    fn a_client_cannot_claim_another_clients_subjects() {
+        // The retired continuity field is now an unknown field: a registry
+        // that still carries it stops the service instead of being ignored.
+        let aliased = serde_json::json!([
             { "client_id": "0x1", "name": "0x1", "skin": "cell",
               "redirect_uris": ["https://nilx.one/cb"], "pub_dress": true,
               "legacy_subject_client_id": "nilx-one" }
         ]);
-        let config = Config::from_lookup(lookup(&[("AIS_CLIENTS", &pair.to_string())])).unwrap();
-        assert_eq!(
-            config.clients["0x1"].legacy_subject_client_id.as_deref(),
-            Some("nilx-one")
-        );
-        assert_eq!(config.clients["nilx-one"].legacy_subject_client_id, None);
-        for malformed in [
-            serde_json::json!([pair[1]]),
-            serde_json::json!([pair[0], {
-                "client_id": "0x1", "name": "0x1", "skin": "cell",
-                "redirect_uris": ["https://nilx.one/cb", "https://nilx.one/another/callback"],
-                "pub_dress": true, "legacy_subject_client_id": "nilx-one"
-            }]),
-            serde_json::json!([pair[0], {
-                "client_id": "0x1", "name": "0x1", "skin": "cell",
-                "redirect_uris": [TELEGRAM_CALLBACK],
-                "pub_dress": true, "legacy_subject_client_id": "nilx-one"
-            }]),
-            serde_json::json!([pair[0], {
-                "client_id": "0x1", "name": "0x1", "skin": "cell",
-                "redirect_uris": ["https://evil.example/cb"], "pub_dress": true,
-                "legacy_subject_client_id": "nilx-one"
-            }]),
-            serde_json::json!([pair[0], {
-                "client_id": "prism", "name": "Prism", "skin": "cell",
-                "redirect_uris": ["https://nilx.one/cb"], "pub_dress": true,
-                "legacy_subject_client_id": "nilx-one"
-            }]),
-            serde_json::json!([pair[0], {
-                "client_id": "0x1", "name": "0x1", "skin": "cell",
-                "redirect_uris": ["https://nilx.one/cb"], "pub_dress": false,
-                "legacy_subject_client_id": "nilx-one"
-            }]),
-        ] {
-            assert!(matches!(
-                Config::from_lookup(lookup(&[("AIS_CLIENTS", &malformed.to_string())])),
-                Err(ConfigError::Clients(_))
-            ));
-        }
+        assert!(matches!(
+            Config::from_lookup(lookup(&[("AIS_CLIENTS", &aliased.to_string())])),
+            Err(ConfigError::Clients(_))
+        ));
     }
 
     #[test]
