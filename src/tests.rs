@@ -1261,7 +1261,7 @@ async fn a_product_gets_a_token_for_the_hub_with_its_own_key() {
     let body: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
     assert_eq!(
         body["scope"],
-        "hub.call hub.events telegram.special.purchase"
+        "bond.profile.read hub.call hub.events telegram.special.purchase"
     );
 }
 
