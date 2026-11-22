@@ -758,7 +758,9 @@ async fn the_0x1_successor_token_proves_continuity_without_reusing_the_old_audie
             .unwrap(),
     )
     .unwrap();
-    assert!(back.starts_with(TELEGRAM_CALLBACK));
+    let mut redirect = back;
+    redirect.set_query(None);
+    assert_eq!(redirect.as_str(), TELEGRAM_CALLBACK);
     assert_eq!(claims["aud"], "0x1");
     assert_ne!(claims["sub"], old.subject);
     assert_eq!(claims["subject_continuity"]["from_client_id"], "nilx-one");
