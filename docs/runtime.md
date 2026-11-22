@@ -68,8 +68,9 @@ set of secrets and a service whose every identifier has changed.
 - **`pub_dress`** allows the client to ask for the address in the token.
 - **Staged `client_id` migration:** an optional `legacy_subject_client_id`
   may be configured **only** on the `0x1` successor to the currently
-  registered `nilx-one` client, with identical redirect URI, `cell` skin,
-  and `pub_dress` scope. When enabled, AIS adds a signed
+  registered `nilx-one` client, preserving its registered callbacks, `cell` skin,
+  and `pub_dress` scope. The successor may additionally register the exact
+  `https://nilx.one/api/v1/telegram/login/callback` URI. When enabled, AIS adds a signed
   `subject_continuity: { from_client_id: "nilx-one", sub: "..." }` claim
   **only** to `0x1`-audience ID tokens. It attests that the predecessor and
   successor subjects came from the same private AIS identity, rather than
