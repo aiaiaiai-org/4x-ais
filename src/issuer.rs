@@ -67,9 +67,6 @@ struct PendingCode {
     code_challenge: String,
     nonce: String,
     subject: String,
-    /// Issuer-signed evidence of the SAME AIS person under the old 0x1
-    /// client. Never emitted to another audience.
-    subject_continuity: Option<(String, String)>,
     pub_dress: Option<String>,
     auth_time: u64,
     expires_at: u64,
@@ -926,12 +923,6 @@ async fn complete(ctx: &Ctx<'_>, identity: &Identity) -> Response {
                 code_challenge: request.code_challenge.clone(),
                 nonce: request.nonce.clone(),
                 subject,
-                subject_continuity: ctx.client.legacy_subject_client_id.as_ref().map(|legacy| {
-                    (
-                        legacy.clone(),
-                        ctx.state.keys.pairwise_subject(legacy, &identity.subject),
-                    )
-                }),
                 pub_dress: request.pub_dress_scope.then(|| identity.pub_dress.clone()),
                 auth_time: ctx.now,
                 expires_at: ctx.now + CODE_TTL,
@@ -1044,13 +1035,6 @@ async fn token(
     });
     if let Some(pub_dress) = pending.pub_dress {
         claims["pub_dress"] = serde_json::Value::String(pub_dress);
-    }
-    if let Some((from_client_id, sub)) = pending.subject_continuity {
-        // Signed within an id_token whose aud is exactly client.client_id.
-        // Unlike a public address, this is AIS-authoritative proof that both
-        // pairwise subjects were derived from one private identity.
-        claims["subject_continuity"] =
-            serde_json::json!({"from_client_id": from_client_id, "sub": sub});
     }
     let id_token = sign_jwt(&state.config.signing_key, &state.config.key_id, &claims);
     // OIDC requires an access token in the response. No resource accepts it

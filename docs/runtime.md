@@ -69,22 +69,12 @@ set of secrets and a service whose every identifier has changed.
 - **`skin`** is presentation only. `cell` shows the whole prefix `0x0`–`0xf` as
   one choice; `slug` shows the name alone, and AIS assigns the prefix.
 - **`pub_dress`** allows the client to ask for the address in the token.
-- **`client_id` continuity:** an optional `legacy_subject_client_id`
-  may be configured **only** on a `0x1` successor to a registered
-  `nilx-one` client, preserving its registered callbacks, `cell` skin,
-  and `pub_dress` scope. The successor may additionally register the exact
-  `https://nilx.one/api/v1/telegram/login/callback` URI. When enabled, AIS adds a signed
-  `subject_continuity: { from_client_id: "nilx-one", sub: "..." }` claim
-  **only** to `0x1`-audience ID tokens. It attests that the predecessor and
-  successor subjects came from the same private AIS identity, rather than
-  treating a matching public address as proof. The regular `sub` remains
-  pairwise and distinct across the two clients; other products receive no
-  continuity claim. The production registry in
-  `deploy/prepare-runtime-env.sh` does not use it: the `nilx-one` client was
-  retired before anyone signed in through it (owner decision, 2026-11-22),
-  so `0x1` is registered alone. Registering the Telegram callback opens no
-  product session by itself: the 0x1 host must still verify the provider
-  link and the original sender's confirmation before it acts on it.
+- **One client per product.** `0x1` is registered alone; the `nilx-one`
+  client was retired before anyone signed in through it (owner decision,
+  2026-11-22). AIS signs no alias between clients: each pairwise `sub` stands
+  on its own. Registering the Telegram callback opens no product session by
+  itself: the 0x1 host must still verify the provider link and the original
+  sender's confirmation before it acts on it.
 - **`secret_sha256`** is optional. A client that has none is a **public
   client**: it holds no secret and names itself with `client_id` at `/token`.
   What binds its code to it is PKCE (S256, required of every client) and the
