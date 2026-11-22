@@ -1754,6 +1754,30 @@ async fn registered_bond_profile_uses_one_priv_id_across_products() {
     .await
     .unwrap();
     assert_eq!(changed.rows_affected(), 1);
+    // `priv_id` is its own random value, never the private subject.
+    let exposed: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM identities WHERE 'bond_' || lower(hex(subject)) = ?",
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(exposed, 0);
+    let assigned: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM bond_ids WHERE 'bond_' || lower(hex(priv_id)) = ?",
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(assigned, 1);
+    assert!(
+        sqlx::query("UPDATE bond_ids SET priv_id = zeroblob(32)")
+            .execute(&pool)
+            .await
+            .is_err(),
+        "priv_id must be immutable"
+    );
     pool.close().await;
     let restarted = app_with_store(Store::connect(&database).await.unwrap());
     let reply = post_json(

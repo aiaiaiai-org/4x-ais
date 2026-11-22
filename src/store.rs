@@ -1,8 +1,9 @@
 // © 2026 aiaiaiai · aiaiaiai.org
 // SPDX-License-Identifier: Apache-2.0
 
-//! People, their native credentials, and shared Bond profile data. OIDC
-//! subjects stay pairwise. Authorized family products can resolve a Bond.
+//! People, their native credentials, and shared Bond profile data. The private
+//! subject never leaves AIS: OIDC subjects stay pairwise, and authorized family
+//! products address a Bond by its separate random `priv_id`.
 
 use std::str::FromStr as _;
 
@@ -46,7 +47,20 @@ CREATE TRIGGER IF NOT EXISTS identities_subject_immutable
 BEFORE UPDATE OF subject ON identities
 WHEN OLD.subject <> NEW.subject
 BEGIN
-    SELECT RAISE(ABORT, 'Bond private identifier is immutable');
+    SELECT RAISE(ABORT, 'AIS private subject is immutable');
+END;
+
+-- The shared Bond identifier: random, independent of the private subject and
+-- of every key, assigned once and never changed.
+CREATE TABLE IF NOT EXISTS bond_ids (
+    subject BLOB PRIMARY KEY NOT NULL REFERENCES identities(subject) ON DELETE CASCADE,
+    priv_id BLOB NOT NULL UNIQUE CHECK (length(priv_id) = 32)
+) STRICT;
+
+CREATE TRIGGER IF NOT EXISTS bond_ids_immutable
+BEFORE UPDATE ON bond_ids
+BEGIN
+    SELECT RAISE(ABORT, 'Bond priv_id is immutable');
 END;
 
 -- Product assertions already spent, kept until they would have expired, so a
@@ -154,13 +168,14 @@ pub(crate) enum ProfileUpdate {
     Stale,
 }
 
-/// The family API uses the existing Bond identifier encoding.
-pub(crate) fn encode_priv_id(subject: &[u8; 32]) -> String {
+/// `bond_` followed by the 32 random bytes of the Bond's `priv_id` in
+/// lowercase hex.
+pub(crate) fn encode_priv_id(priv_id: &[u8; 32]) -> String {
     use std::fmt::Write as _;
 
     let mut value = String::with_capacity(69);
     value.push_str("bond_");
-    for byte in subject {
+    for byte in priv_id {
         write!(value, "{byte:02x}").expect("writing to a String cannot fail");
     }
     value
@@ -188,30 +203,52 @@ async fn read_bond_profile(
          LEFT JOIN bond_context c ON c.subject = i.subject WHERE i.subject = ?",
     )
     .bind(subject.as_slice())
-    .fetch_optional(connection)
+    .fetch_optional(&mut *connection)
     .await?;
-    row.map(|row| {
-        let location = match (
-            row.try_get::<Option<i32>, _>("longitude_e7")?,
-            row.try_get::<Option<i32>, _>("latitude_e7")?,
-        ) {
-            (None, None) => None,
-            (Some(lon), Some(lat)) => Some(
-                GeoCoordinate::new(lon, lat)
-                    .map_err(|_| sqlx::Error::Protocol("stored Bond location is invalid".into()))?,
-            ),
-            _ => return Err(sqlx::Error::Protocol("incomplete Bond location".into())),
-        };
-        Ok(BondProfile {
-            priv_id: encode_priv_id(subject),
-            pub_dress: row.try_get("pub_dress")?,
-            localization: row.try_get("localization")?,
-            location,
-            revision: row.try_get("revision")?,
-        })
-    })
-    .transpose()
-    .map_err(Into::into)
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let location = match (
+        row.try_get::<Option<i32>, _>("longitude_e7")?,
+        row.try_get::<Option<i32>, _>("latitude_e7")?,
+    ) {
+        (None, None) => None,
+        (Some(lon), Some(lat)) => Some(
+            GeoCoordinate::new(lon, lat)
+                .map_err(|_| sqlx::Error::Protocol("stored Bond location is invalid".into()))?,
+        ),
+        _ => return Err(sqlx::Error::Protocol("incomplete Bond location".into()).into()),
+    };
+    let priv_id = ensure_priv_id(connection, subject).await?;
+    Ok(Some(BondProfile {
+        priv_id: encode_priv_id(&priv_id),
+        pub_dress: row.try_get("pub_dress")?,
+        localization: row.try_get("localization")?,
+        location,
+        revision: row.try_get("revision")?,
+    }))
+}
+
+/// The Bond's `priv_id`, assigned on first use. `INSERT OR IGNORE` keeps the
+/// first value when two callers race, so the identifier never changes. The
+/// caller has already confirmed that the identity exists.
+async fn ensure_priv_id(
+    connection: &mut sqlx::SqliteConnection,
+    subject: &[u8; 32],
+) -> Result<[u8; 32], StoreError> {
+    let candidate = crate::crypto::random_bytes::<32>().ok_or(StoreError::Entropy)?;
+    sqlx::query("INSERT OR IGNORE INTO bond_ids (subject, priv_id) VALUES (?, ?)")
+        .bind(subject.as_slice())
+        .bind(candidate.as_slice())
+        .execute(&mut *connection)
+        .await?;
+    let stored: Vec<u8> = sqlx::query_scalar("SELECT priv_id FROM bond_ids WHERE subject = ?")
+        .bind(subject.as_slice())
+        .fetch_one(&mut *connection)
+        .await?;
+    stored
+        .try_into()
+        .map_err(|_| sqlx::Error::Protocol("stored Bond priv_id is invalid".into()).into())
 }
 
 #[derive(Clone)]
@@ -239,6 +276,22 @@ impl Store {
     ) -> Result<Option<BondProfile>, StoreError> {
         let mut connection = self.pool.acquire().await?;
         read_bond_profile(&mut connection, subject).await
+    }
+
+    /// The Bond's `priv_id`, or `None` for an unknown identity.
+    pub(crate) async fn bond_priv_id(
+        &self,
+        subject: &[u8; 32],
+    ) -> Result<Option<[u8; 32]>, StoreError> {
+        let mut connection = self.pool.acquire().await?;
+        let known: Option<i64> = sqlx::query_scalar("SELECT 1 FROM identities WHERE subject = ?")
+            .bind(subject.as_slice())
+            .fetch_optional(&mut *connection)
+            .await?;
+        if known.is_none() {
+            return Ok(None);
+        }
+        ensure_priv_id(&mut connection, subject).await.map(Some)
     }
 
     pub(crate) async fn update_bond_profile(
