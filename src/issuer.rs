@@ -111,6 +111,11 @@ pub fn router(config: Config, store: Store) -> Router {
         .route("/family/pass", post(crate::pass::issue))
         .route("/family/accounts", post(crate::family::put))
         .route("/family/link", post(crate::family::link))
+        .route("/family/bond/profile", post(crate::family::bond_profile))
+        .route(
+            "/family/bond/context",
+            post(crate::family::put_bond_context),
+        )
         .route(
             "/family/telegram-identity",
             post(crate::telegram_identity::resolve),

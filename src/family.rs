@@ -16,13 +16,13 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::Response,
 };
-use nilxone_contracts::PubDress;
-use serde::Deserialize;
+use nilxone_contracts::{GeoCoordinate, PubDress};
+use serde::{Deserialize, Deserializer};
 
 use crate::{
     issuer::{AppState, no_store, now, token_error},
-    relay::caller,
-    store::LinkReport,
+    relay::{Caller, caller},
+    store::{BondContextUpdate, LinkReport, ProfileUpdate, decode_priv_id},
 };
 
 /// The scope a relay's token must hold to report a product's account.
@@ -162,6 +162,140 @@ pub(crate) async fn link(
             }),
         ),
         Ok(None) => token_error(StatusCode::NOT_FOUND, "unknown"),
+        Err(error) => unavailable(&error),
+    }
+}
+
+const BOND_PROFILE_READ: &str = "bond.profile.read";
+const BOND_PROFILE_WRITE: &str = "bond.profile.write";
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ProfileQuery {
+    subject: String,
+    priv_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ContextReport {
+    subject: String,
+    priv_id: String,
+    expected_revision: i64,
+    #[serde(deserialize_with = "nullable")]
+    localization: Option<String>,
+    #[serde(deserialize_with = "nullable")]
+    location: Option<GeoCoordinate>,
+}
+
+fn nullable<'de, D, T>(decoder: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(decoder)
+}
+
+fn profile_caller(state: &AppState, headers: &HeaderMap, scope: &str) -> Option<Caller> {
+    let actor = caller(state, headers, now(), scope)?;
+    // The relay and the acting product must both have an explicit grant.
+    // A relay token alone cannot grant profile access to another product.
+    state
+        .config
+        .clients
+        .get(&actor.asker)?
+        .product
+        .as_ref()?
+        .tokens
+        .get(&actor.relay)?
+        .contains(scope)
+        .then_some(actor)
+}
+
+async fn profile_subject(
+    state: &AppState,
+    actor: &Caller,
+    sub: &str,
+    priv_id: Option<&str>,
+) -> Result<Option<[u8; 32]>, crate::store::StoreError> {
+    let binding = state.store.subject_for(&actor.asker, sub).await?;
+    Ok(match priv_id {
+        Some(value) => decode_priv_id(value).filter(|id| Some(*id) == binding),
+        None => binding,
+    })
+}
+
+fn valid_profile_target(sub: &str, priv_id: Option<&str>) -> bool {
+    subject_ok(sub) && priv_id.is_none_or(|id| decode_priv_id(id).is_some())
+}
+
+pub(crate) async fn bond_profile(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(query): Json<ProfileQuery>,
+) -> Response {
+    let Some(actor) = profile_caller(&state, &headers, BOND_PROFILE_READ) else {
+        return token_error(StatusCode::UNAUTHORIZED, "invalid_token");
+    };
+    if !valid_profile_target(&query.subject, query.priv_id.as_deref()) {
+        return token_error(StatusCode::BAD_REQUEST, "invalid_request");
+    }
+    let subject =
+        match profile_subject(&state, &actor, &query.subject, query.priv_id.as_deref()).await {
+            Ok(Some(subject)) => subject,
+            Ok(None) => return token_error(StatusCode::NOT_FOUND, "unknown"),
+            Err(error) => return unavailable(&error),
+        };
+    match state.store.bond_profile(&subject).await {
+        Ok(Some(profile)) => no_store(StatusCode::OK, serde_json::json!(profile)),
+        Ok(None) => token_error(StatusCode::NOT_FOUND, "unknown"),
+        Err(error) => unavailable(&error),
+    }
+}
+
+fn valid_localization(value: &str) -> bool {
+    let mut parts = value.split('-');
+    let language = parts.next().unwrap_or_default();
+    value.len() <= 63
+        && (2..=8).contains(&language.len())
+        && language.bytes().all(|byte| byte.is_ascii_alphabetic())
+        && parts.all(|part| {
+            (1..=8).contains(&part.len()) && part.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        })
+}
+
+pub(crate) async fn put_bond_context(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(report): Json<ContextReport>,
+) -> Response {
+    let Some(actor) = profile_caller(&state, &headers, BOND_PROFILE_WRITE) else {
+        return token_error(StatusCode::UNAUTHORIZED, "invalid_token");
+    };
+    if !valid_profile_target(&report.subject, Some(&report.priv_id))
+        || report.expected_revision < 0
+        || !report
+            .localization
+            .as_deref()
+            .is_none_or(valid_localization)
+    {
+        return token_error(StatusCode::BAD_REQUEST, "invalid_request");
+    }
+    let subject =
+        match profile_subject(&state, &actor, &report.subject, Some(&report.priv_id)).await {
+            Ok(Some(subject)) => subject,
+            Ok(None) => return token_error(StatusCode::NOT_FOUND, "unknown"),
+            Err(error) => return unavailable(&error),
+        };
+    let update = BondContextUpdate {
+        localization: report.localization,
+        location: report.location,
+        expected_revision: report.expected_revision,
+    };
+    match state.store.update_bond_profile(&subject, update).await {
+        Ok(ProfileUpdate::Updated(profile)) => no_store(StatusCode::OK, serde_json::json!(profile)),
+        Ok(ProfileUpdate::Unknown) => token_error(StatusCode::NOT_FOUND, "unknown"),
+        Ok(ProfileUpdate::Stale) => token_error(StatusCode::CONFLICT, "stale_revision"),
         Err(error) => unavailable(&error),
     }
 }

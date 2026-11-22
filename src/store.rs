@@ -1,12 +1,12 @@
 // © 2026 aiaiaiai · aiaiaiai.org
 // SPDX-License-Identifier: Apache-2.0
 
-//! People and their native credentials. The private subject never leaves AIS:
-//! clients only ever see a pairwise digest of it.
+//! People, their native credentials, and shared Bond profile data. OIDC
+//! subjects stay pairwise. Authorized family products can resolve a Bond.
 
 use std::str::FromStr as _;
 
-use nilxone_contracts::{PubDress, PubDressLabel};
+use nilxone_contracts::{GeoCoordinate, PubDress, PubDressLabel};
 use sqlx::{
     Row as _, SqlitePool,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
@@ -29,6 +29,25 @@ CREATE TABLE IF NOT EXISTS identities (
     password_hash TEXT NOT NULL,
     created_at INTEGER NOT NULL CHECK (created_at >= 0)
 ) STRICT;
+
+-- Shared profile fields attach to the immutable identity, never to a handle.
+CREATE TABLE IF NOT EXISTS bond_context (
+    subject BLOB PRIMARY KEY NOT NULL REFERENCES identities(subject) ON DELETE CASCADE,
+    localization TEXT,
+    longitude_e7 INTEGER,
+    latitude_e7 INTEGER,
+    revision INTEGER NOT NULL CHECK (revision > 0),
+    CHECK ((longitude_e7 IS NULL) = (latitude_e7 IS NULL)),
+    CHECK (longitude_e7 BETWEEN -1800000000 AND 1800000000),
+    CHECK (latitude_e7 BETWEEN -900000000 AND 900000000)
+) STRICT;
+
+CREATE TRIGGER IF NOT EXISTS identities_subject_immutable
+BEFORE UPDATE OF subject ON identities
+WHEN OLD.subject <> NEW.subject
+BEGIN
+    SELECT RAISE(ABORT, 'Bond private identifier is immutable');
+END;
 
 -- Product assertions already spent, kept until they would have expired, so a
 -- signed assertion buys exactly one token.
@@ -114,6 +133,87 @@ pub struct FamilyLink {
     pub as_of: u64,
 }
 
+#[derive(serde::Serialize)]
+pub(crate) struct BondProfile {
+    priv_id: String,
+    pub_dress: String,
+    localization: Option<String>,
+    location: Option<GeoCoordinate>,
+    revision: i64,
+}
+
+pub(crate) struct BondContextUpdate {
+    pub(crate) localization: Option<String>,
+    pub(crate) location: Option<GeoCoordinate>,
+    pub(crate) expected_revision: i64,
+}
+
+pub(crate) enum ProfileUpdate {
+    Updated(BondProfile),
+    Unknown,
+    Stale,
+}
+
+/// The family API uses the existing Bond identifier encoding.
+pub(crate) fn encode_priv_id(subject: &[u8; 32]) -> String {
+    use std::fmt::Write as _;
+
+    let mut value = String::with_capacity(69);
+    value.push_str("bond_");
+    for byte in subject {
+        write!(value, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    value
+}
+
+pub(crate) fn decode_priv_id(value: &str) -> Option<[u8; 32]> {
+    let hex = value.strip_prefix("bond_")?;
+    if hex.len() != 64 || !hex.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
+        return None;
+    }
+    let mut bytes = [0; 32];
+    for (i, byte) in bytes.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok()?;
+    }
+    Some(bytes)
+}
+
+async fn read_bond_profile(
+    connection: &mut sqlx::SqliteConnection,
+    subject: &[u8; 32],
+) -> Result<Option<BondProfile>, StoreError> {
+    let row = sqlx::query(
+        "SELECT i.pub_dress, c.localization, c.longitude_e7, c.latitude_e7, \
+         COALESCE(c.revision, 0) AS revision FROM identities i \
+         LEFT JOIN bond_context c ON c.subject = i.subject WHERE i.subject = ?",
+    )
+    .bind(subject.as_slice())
+    .fetch_optional(connection)
+    .await?;
+    row.map(|row| {
+        let location = match (
+            row.try_get::<Option<i32>, _>("longitude_e7")?,
+            row.try_get::<Option<i32>, _>("latitude_e7")?,
+        ) {
+            (None, None) => None,
+            (Some(lon), Some(lat)) => Some(
+                GeoCoordinate::new(lon, lat)
+                    .map_err(|_| sqlx::Error::Protocol("stored Bond location is invalid".into()))?,
+            ),
+            _ => return Err(sqlx::Error::Protocol("incomplete Bond location".into())),
+        };
+        Ok(BondProfile {
+            priv_id: encode_priv_id(subject),
+            pub_dress: row.try_get("pub_dress")?,
+            localization: row.try_get("localization")?,
+            location,
+            revision: row.try_get("revision")?,
+        })
+    })
+    .transpose()
+    .map_err(Into::into)
+}
+
 #[derive(Clone)]
 pub struct Store {
     pool: SqlitePool,
@@ -131,6 +231,50 @@ impl Store {
             .await?;
         sqlx::raw_sql(SCHEMA).execute(&pool).await?;
         Ok(Self { pool })
+    }
+
+    pub(crate) async fn bond_profile(
+        &self,
+        subject: &[u8; 32],
+    ) -> Result<Option<BondProfile>, StoreError> {
+        let mut connection = self.pool.acquire().await?;
+        read_bond_profile(&mut connection, subject).await
+    }
+
+    pub(crate) async fn update_bond_profile(
+        &self,
+        subject: &[u8; 32],
+        update: BondContextUpdate,
+    ) -> Result<ProfileUpdate, StoreError> {
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let Some(current) = read_bond_profile(&mut tx, subject).await? else {
+            return Ok(ProfileUpdate::Unknown);
+        };
+        if current.revision != update.expected_revision {
+            return Ok(ProfileUpdate::Stale);
+        }
+        let revision = current
+            .revision
+            .checked_add(1)
+            .ok_or_else(|| sqlx::Error::Protocol("Bond context revision exhausted".into()))?;
+        sqlx::query(
+            "INSERT INTO bond_context (subject, localization, longitude_e7, latitude_e7, revision) \
+             VALUES (?, ?, ?, ?, ?) ON CONFLICT(subject) DO UPDATE SET \
+             localization = excluded.localization, longitude_e7 = excluded.longitude_e7, \
+             latitude_e7 = excluded.latitude_e7, revision = excluded.revision",
+        )
+        .bind(subject.as_slice())
+        .bind(update.localization)
+        .bind(update.location.map(GeoCoordinate::longitude_e7))
+        .bind(update.location.map(GeoCoordinate::latitude_e7))
+        .bind(revision)
+        .execute(&mut *tx)
+        .await?;
+        let profile = read_bond_profile(&mut tx, subject)
+            .await?
+            .ok_or(sqlx::Error::RowNotFound)?;
+        tx.commit().await?;
+        Ok(ProfileUpdate::Updated(profile))
     }
 
     /// The address that reads like this one, as it was registered.
