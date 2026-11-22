@@ -51,6 +51,11 @@ fn hex_sha256(value: &str) -> String {
 }
 
 async fn app() -> Router {
+    let store = Store::connect("sqlite::memory:").await.expect("store");
+    app_with_store(store)
+}
+
+fn app_with_store(store: Store) -> Router {
     let clients = serde_json::json!([
         { "client_id": "nilx-one", "name": "0x1", "skin": "cell", "redirect_uris": [ONE_CALLBACK],
           "secret_sha256": hex_sha256(SECRET), "pub_dress": true,
@@ -59,7 +64,7 @@ async fn app() -> Router {
         { "client_id": "0x1", "name": "0x1", "skin": "cell", "redirect_uris": [ONE_CALLBACK, TELEGRAM_CALLBACK],
           "pub_dress": true,
           "product": { "keys": [{ "kid": "o1", "x": public_key(ONE_KEY) }],
-                       "tokens": { "prism-hub": ["telegram.link.put"], "ais": ["telegram.identity.resolve"] } } },
+                       "tokens": { "prism-hub": ["telegram.link.put", "bond.profile.read", "bond.profile.write"], "ais": ["telegram.identity.resolve"] } } },
         { "client_id": "prism", "name": "Prism", "skin": "slug", "redirect_uris": [PRISM_CALLBACK],
           "secret_sha256": hex_sha256(SECRET) },
         // A public client: no secret, only PKCE.
@@ -67,14 +72,14 @@ async fn app() -> Router {
         // Family products (hub.v1): keys and token grants, no secret.
         { "client_id": "0xda-market", "name": "0xda-market", "skin": "cell", "redirect_uris": [],
           "product": { "keys": [{ "kid": "m1", "x": public_key(MARKET_KEY) }],
-                       "tokens": { "prism-hub": ["hub.call", "hub.events", "telegram.special.purchase"] } } },
+                       "tokens": { "prism-hub": ["hub.call", "hub.events", "telegram.special.purchase", "bond.profile.read"] } } },
         // Holds the link scope but is not 0x1: tests the actor check.
         { "client_id": "partner", "name": "Partner", "skin": "cell", "redirect_uris": [],
           "product": { "keys": [{ "kid": "p1", "x": public_key(MARKET_KEY) }],
                        "tokens": { "prism-hub": ["telegram.link.put"] } } },
         { "client_id": "prism-hub", "name": "Prism Hub", "skin": "slug", "redirect_uris": [],
           "product": { "keys": [{ "kid": "h1", "x": public_key(HUB_KEY) }],
-                       "tokens": { "0xda-market": ["hub.relay"], "ais": ["pass.issue", "accounts.put", "link.read", "telegram.link.put", "telegram.special.purchase"] }, "relay": true } },
+                       "tokens": { "0xda-market": ["hub.relay"], "ais": ["pass.issue", "accounts.put", "link.read", "telegram.link.put", "telegram.special.purchase", "bond.profile.read", "bond.profile.write"] }, "relay": true } },
     ])
     .to_string();
     let config = Config::from_lookup(move |key| {
@@ -90,7 +95,6 @@ async fn app() -> Router {
         })
     })
     .expect("test configuration");
-    let store = Store::connect("sqlite::memory:").await.expect("store");
     router(config, store)
 }
 
@@ -291,7 +295,16 @@ impl Flow {
 
 /// Registers through the 0x1 (`cell`) page with a chosen prefix.
 async fn register_cell(app: &Router, prefix: &str, slug: &str) -> (Flow, Reply) {
-    let flow = open(app, "nilx-one", ONE_CALLBACK, None).await;
+    register_cell_for(app, "nilx-one", prefix, slug).await
+}
+
+async fn register_cell_for(
+    app: &Router,
+    client: &'static str,
+    prefix: &str,
+    slug: &str,
+) -> (Flow, Reply) {
+    let flow = open(app, client, ONE_CALLBACK, None).await;
     let page = flow
         .post(
             app,
@@ -1248,7 +1261,7 @@ async fn a_product_gets_a_token_for_the_hub_with_its_own_key() {
     let body: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
     assert_eq!(
         body["scope"],
-        "hub.call hub.events telegram.special.purchase"
+        "bond.profile.read hub.call hub.events telegram.special.purchase"
     );
 }
 
@@ -1581,9 +1594,18 @@ fn unix_now() -> u64 {
 
 /// A person signed into 0x1, and the subject the market knows them by.
 async fn person_in_both(app: &Router, slug: &str, n: u32) -> (String, String) {
-    let (flow, reply) = register_cell(app, "f", slug).await;
+    person_in_both_as(app, "nilx-one", slug, n).await
+}
+
+async fn person_in_both_as(
+    app: &Router,
+    client: &'static str,
+    slug: &str,
+    n: u32,
+) -> (String, String) {
+    let (flow, reply) = register_cell_for(app, client, "f", slug).await;
     let one_sub = flow.verified(app, &reply).await.expect("verified").subject;
-    let token = hub_pass_token(app, "nilx-one", &format!("hub-link-pass-{n:08}")).await;
+    let token = hub_pass_token(app, client, &format!("hub-link-pass-{n:08}")).await;
     let reply = ask_pass(
         app,
         &token,
@@ -1593,6 +1615,161 @@ async fn person_in_both(app: &Router, slug: &str, n: u32) -> (String, String) {
     let body: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
     let (_, claims) = token_claims(body["pass"].as_str().unwrap());
     (one_sub, claims["sub"].as_str().unwrap().to_owned())
+}
+
+#[tokio::test]
+async fn registered_bond_profile_uses_one_priv_id_across_products() {
+    use serde_json::{Value, json};
+
+    let dir = tempfile::tempdir().unwrap();
+    let database = format!("sqlite://{}", dir.path().join("ais.sqlite").display());
+    let app = app_with_store(Store::connect(&database).await.unwrap());
+    let (one_sub, market_sub) = person_in_both_as(&app, "0x1", "sharedprofile", 91).await;
+    let (_, other_market_sub) = person_in_both_as(&app, "0x1", "otherprofile", 92).await;
+    let one_read =
+        hub_token_with_scope(&app, "0x1", "profile-one-read-0001", "bond.profile.read").await;
+    let one_write =
+        hub_token_with_scope(&app, "0x1", "profile-one-write-0001", "bond.profile.write").await;
+    let market_read = hub_token_with_scope(
+        &app,
+        "0xda-market",
+        "profile-market-read-0001",
+        "bond.profile.read",
+    )
+    .await;
+    let market_write = hub_token_with_scope(
+        &app,
+        "0xda-market",
+        "profile-market-write-0001",
+        "bond.profile.write",
+    )
+    .await;
+
+    let profile = "/family/bond/profile";
+    let context = "/family/bond/context";
+    let initial = post_json(&app, profile, &one_read, json!({ "subject": one_sub })).await;
+    assert_eq!(initial.status, StatusCode::OK, "{}", initial.body);
+    assert_eq!(initial.headers[header::CACHE_CONTROL], "no-store");
+    let first: Value = serde_json::from_str(&initial.body).unwrap();
+    let id = first["priv_id"].as_str().unwrap();
+    assert!(id.starts_with("bond_"));
+    assert_eq!(id.len(), 69);
+    assert_eq!(first["pub_dress"], "0xfsharedprofile");
+    assert_eq!(first["revision"], 0);
+    assert!(first["localization"].is_null());
+    assert!(first["location"].is_null());
+
+    let location = json!({ "latitude_e7": "504500000", "longitude_e7": "305234000" });
+    let update = json!({ "subject": one_sub, "priv_id": id, "expected_revision": 0,
+                         "localization": "uk-UA", "location": location });
+    let reply = post_json(&app, context, &one_write, update.clone()).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let updated: Value = serde_json::from_str(&reply.body).unwrap();
+    assert_eq!(updated["priv_id"], id);
+    assert_eq!(updated["pub_dress"], first["pub_dress"]);
+    assert_eq!(updated["localization"], "uk-UA");
+    assert_eq!(updated["location"], location);
+    assert_eq!(updated["revision"], 1);
+
+    let market_query = json!({ "subject": market_sub, "priv_id": id });
+    let reply = post_json(&app, profile, &market_read, market_query.clone()).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_eq!(serde_json::from_str::<Value>(&reply.body).unwrap(), updated);
+
+    assert_eq!(
+        post_json(&app, context, &one_write, update).await.status,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        post_json(
+            &app,
+            profile,
+            &market_read,
+            json!({ "subject": other_market_sub, "priv_id": id })
+        )
+        .await
+        .status,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        post_json(&app, profile, &market_read, json!({ "priv_id": id }))
+            .await
+            .status,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        post_json(&app, profile, "invalid", market_query)
+            .await
+            .status,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        post_json(
+            &app,
+            context,
+            &market_write,
+            json!({ "subject": market_sub, "priv_id": id,
+                   "expected_revision": 1, "localization": null, "location": null })
+        )
+        .await
+        .status,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        post_json(
+            &app,
+            context,
+            &one_write,
+            json!({ "subject": one_sub, "priv_id": id,
+                   "expected_revision": 1, "localization": "en-GB" })
+        )
+        .await
+        .status,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let cleared = post_json(
+        &app,
+        context,
+        &one_write,
+        json!({ "subject": one_sub,
+            "priv_id": id, "expected_revision": 1, "localization": "en-GB", "location": null }),
+    )
+    .await;
+    assert_eq!(cleared.status, StatusCode::OK, "{}", cleared.body);
+    let cleared: Value = serde_json::from_str(&cleared.body).unwrap();
+    assert_eq!(cleared["priv_id"], id);
+    assert_eq!(cleared["localization"], "en-GB");
+    assert_eq!(cleared["revision"], 2);
+    assert!(cleared["location"].is_null());
+
+    // Model an authoritative address edit and service restart. The profile
+    // must read the registry's current address using the same private ID.
+    drop(app);
+    let pool = sqlx::SqlitePool::connect(&database).await.unwrap();
+    let changed = sqlx::query(
+        "UPDATE identities SET pub_dress = '0xfupdatedprofile', label = '0xfupdatedprofile' \
+         WHERE pub_dress = '0xfsharedprofile'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(changed.rows_affected(), 1);
+    pool.close().await;
+    let restarted = app_with_store(Store::connect(&database).await.unwrap());
+    let reply = post_json(
+        &restarted,
+        profile,
+        &market_read,
+        json!({ "subject": market_sub, "priv_id": id }),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let persisted: Value = serde_json::from_str(&reply.body).unwrap();
+    assert_eq!(persisted["priv_id"], id);
+    assert_eq!(persisted["pub_dress"], "0xfupdatedprofile");
+    assert_eq!(persisted["localization"], "en-GB");
+    assert_eq!(persisted["revision"], 2);
+    assert!(persisted["location"].is_null());
 }
 
 #[tokio::test]

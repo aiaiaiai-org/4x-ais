@@ -227,3 +227,32 @@ today's production `0x1` client has no product block, so calls answer 401 or
 Development must use its own product grants, issuer and wallet. These endpoints
 alone do not deliver Telegram link reports, relay the purchase to 0x1, or
 activate checkout in any environment.
+
+## Shared Bond profile
+
+AIS allocates the immutable `priv_id` at registration. The API encodes the
+existing 32-byte AIS identity key as `bond_` followed by 64 lowercase hex
+digits. This value is the same for every authorized product. OIDC `sub`
+continues to identify the signed-in person in the requesting client's scope.
+
+- `POST /family/bond/profile` accepts `{subject, priv_id?}`. The first lookup
+  can omit `priv_id` and use the product's existing AIS person binding to
+  discover it. Subsequent calls can address the Bond by `priv_id`. A supplied
+  identifier must match that established binding.
+- `POST /family/bond/context` accepts
+  `{subject, priv_id, expected_revision, localization, location}`. The two
+  context fields must be explicit. Use `null` to clear one. Localization
+  carries a bounded language tag such as `uk-UA`. Location uses the Core
+  WGS84 E7 coordinate representation with decimal string components. The
+  context stores only the current explicitly supplied location.
+- Responses return `{priv_id, pub_dress, localization, location, revision}`
+  with `Cache-Control: no-store`. AIS reads the current public address from
+  the identity registry. Revision starts at zero. Competing updates to the
+  same revision receive a conflict and can reread before retrying.
+
+The relay needs the appropriate `bond.profile.read` or `bond.profile.write`
+scope for audience `ais`. The acting product must independently hold that
+scope for its relay audience. A mismatched or unknown person binding receives
+the same response. These grants are production configuration and are not
+added by this change. Product code obtains them through the existing AIS
+product-token and relay flow.
