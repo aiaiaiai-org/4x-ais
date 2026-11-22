@@ -4,4 +4,4 @@
 # Consumers pin `ref` to a full commit SHA of the source. Update ref together
 # with the synced files.
 source: aiaiaiai-org/infra
-ref: a1d8d2b5da1944babdd0b552d2d917dbc81da7f6
+ref: 1fa9465f2cae550e25de9fc7bd9f6b9e9077a3bc
