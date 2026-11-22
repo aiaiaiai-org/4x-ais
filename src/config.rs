@@ -224,7 +224,7 @@ fn parse_clients(value: &str) -> Result<HashMap<String, Client>, ConfigError> {
                 })
             {
                 return Err(ConfigError::Clients(
-                    "0x1 continuity requires a registered nilx-one client with compatible redirects, matching skin and pub_dress scope".into(),
+                    "0x1 continuity requires a registered nilx-one client with the same redirects in the same order (plus only the Telegram callback), matching skin and pub_dress scope".into(),
                 ));
             }
         }
@@ -259,6 +259,9 @@ fn parse_clients(value: &str) -> Result<HashMap<String, Client>, ConfigError> {
 }
 
 fn continuity_redirects_match(legacy: &[String], successor: &[String]) -> bool {
+    // Owned by the 0x1 host: nilx-one/core `CALLBACK_PATH` in
+    // crates/nilxone-identity/src/public_info/telegram_login.rs and
+    // docs/runtime.md must change together with this value.
     const TELEGRAM_CALLBACK: &str = "https://nilx.one/api/v1/telegram/login/callback";
 
     if legacy == successor {
