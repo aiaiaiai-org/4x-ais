@@ -59,13 +59,12 @@ fn app_with_store(store: Store) -> Router {
     let clients = serde_json::json!([
         { "client_id": "nilx-one", "name": "0x1", "skin": "cell", "redirect_uris": [ONE_CALLBACK],
           "secret_sha256": hex_sha256(SECRET), "pub_dress": true,
-          "product": { "keys": [{ "kid": "o1", "x": public_key(ONE_KEY) }],
-                       "tokens": { "prism-hub": ["bond.profile.read", "bond.profile.write"] } } },
+          "product": { "keys": [{ "kid": "o1", "x": public_key(ONE_KEY) }] } },
         // 0x1 as in production, plus test-only product grants.
         { "client_id": "0x1", "name": "0x1", "skin": "cell", "redirect_uris": [ONE_CALLBACK, TELEGRAM_CALLBACK],
           "pub_dress": true,
           "product": { "keys": [{ "kid": "o1", "x": public_key(ONE_KEY) }],
-                       "tokens": { "prism-hub": ["telegram.link.put"], "ais": ["telegram.identity.resolve"] } } },
+                       "tokens": { "prism-hub": ["telegram.link.put", "bond.profile.read", "bond.profile.write"], "ais": ["telegram.identity.resolve"] } } },
         { "client_id": "prism", "name": "Prism", "skin": "slug", "redirect_uris": [PRISM_CALLBACK],
           "secret_sha256": hex_sha256(SECRET) },
         // A public client: no secret, only PKCE.
@@ -296,7 +295,16 @@ impl Flow {
 
 /// Registers through the 0x1 (`cell`) page with a chosen prefix.
 async fn register_cell(app: &Router, prefix: &str, slug: &str) -> (Flow, Reply) {
-    let flow = open(app, "nilx-one", ONE_CALLBACK, None).await;
+    register_cell_for(app, "nilx-one", prefix, slug).await
+}
+
+async fn register_cell_for(
+    app: &Router,
+    client: &'static str,
+    prefix: &str,
+    slug: &str,
+) -> (Flow, Reply) {
+    let flow = open(app, client, ONE_CALLBACK, None).await;
     let page = flow
         .post(
             app,
@@ -1586,9 +1594,18 @@ fn unix_now() -> u64 {
 
 /// A person signed into 0x1, and the subject the market knows them by.
 async fn person_in_both(app: &Router, slug: &str, n: u32) -> (String, String) {
-    let (flow, reply) = register_cell(app, "f", slug).await;
+    person_in_both_as(app, "nilx-one", slug, n).await
+}
+
+async fn person_in_both_as(
+    app: &Router,
+    client: &'static str,
+    slug: &str,
+    n: u32,
+) -> (String, String) {
+    let (flow, reply) = register_cell_for(app, client, "f", slug).await;
     let one_sub = flow.verified(app, &reply).await.expect("verified").subject;
-    let token = hub_pass_token(app, "nilx-one", &format!("hub-link-pass-{n:08}")).await;
+    let token = hub_pass_token(app, client, &format!("hub-link-pass-{n:08}")).await;
     let reply = ask_pass(
         app,
         &token,
@@ -1607,22 +1624,12 @@ async fn registered_bond_profile_uses_one_priv_id_across_products() {
     let dir = tempfile::tempdir().unwrap();
     let database = format!("sqlite://{}", dir.path().join("ais.sqlite").display());
     let app = app_with_store(Store::connect(&database).await.unwrap());
-    let (one_sub, market_sub) = person_in_both(&app, "sharedprofile", 91).await;
-    let (_, other_market_sub) = person_in_both(&app, "otherprofile", 92).await;
-    let one_read = hub_token_with_scope(
-        &app,
-        "nilx-one",
-        "profile-one-read-0001",
-        "bond.profile.read",
-    )
-    .await;
-    let one_write = hub_token_with_scope(
-        &app,
-        "nilx-one",
-        "profile-one-write-0001",
-        "bond.profile.write",
-    )
-    .await;
+    let (one_sub, market_sub) = person_in_both_as(&app, "0x1", "sharedprofile", 91).await;
+    let (_, other_market_sub) = person_in_both_as(&app, "0x1", "otherprofile", 92).await;
+    let one_read =
+        hub_token_with_scope(&app, "0x1", "profile-one-read-0001", "bond.profile.read").await;
+    let one_write =
+        hub_token_with_scope(&app, "0x1", "profile-one-write-0001", "bond.profile.write").await;
     let market_read = hub_token_with_scope(
         &app,
         "0xda-market",
