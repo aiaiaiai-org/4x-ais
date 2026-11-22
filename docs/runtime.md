@@ -54,10 +54,13 @@ set of secrets and a service whose every identifier has changed.
 ```json
 [
   {
-    "client_id": "nilx-one",
+    "client_id": "0x1",
     "name": "0x1",
     "skin": "cell",
-    "redirect_uris": ["https://nilx.one/api/v1/auth/aiaiaiai/callback"],
+    "redirect_uris": [
+      "https://nilx.one/api/v1/auth/aiaiaiai/callback",
+      "https://nilx.one/api/v1/telegram/login/callback"
+    ],
     "pub_dress": true
   }
 ]
@@ -66,9 +69,9 @@ set of secrets and a service whose every identifier has changed.
 - **`skin`** is presentation only. `cell` shows the whole prefix `0x0`–`0xf` as
   one choice; `slug` shows the name alone, and AIS assigns the prefix.
 - **`pub_dress`** allows the client to ask for the address in the token.
-- **Staged `client_id` migration:** an optional `legacy_subject_client_id`
-  may be configured **only** on the `0x1` successor to the currently
-  registered `nilx-one` client, preserving its registered callbacks, `cell` skin,
+- **`client_id` continuity:** an optional `legacy_subject_client_id`
+  may be configured **only** on a `0x1` successor to a registered
+  `nilx-one` client, preserving its registered callbacks, `cell` skin,
   and `pub_dress` scope. The successor may additionally register the exact
   `https://nilx.one/api/v1/telegram/login/callback` URI. When enabled, AIS adds a signed
   `subject_continuity: { from_client_id: "nilx-one", sub: "..." }` claim
@@ -77,10 +80,11 @@ set of secrets and a service whose every identifier has changed.
   treating a matching public address as proof. The regular `sub` remains
   pairwise and distinct across the two clients; other products receive no
   continuity claim. The production registry in
-  `deploy/prepare-runtime-env.sh` keeps `nilx-one` and registers `0x1` beside
-  it, with both callbacks. Registration opens no product session by itself:
-  the 0x1 host must still verify the provider link and the original
-  sender's confirmation before it acts on a Telegram callback.
+  `deploy/prepare-runtime-env.sh` does not use it: the `nilx-one` client was
+  retired before anyone signed in through it (owner decision, 2026-11-22),
+  so `0x1` is registered alone. Registering the Telegram callback opens no
+  product session by itself: the 0x1 host must still verify the provider
+  link and the original sender's confirmation before it acts on it.
 - **`secret_sha256`** is optional. A client that has none is a **public
   client**: it holds no secret and names itself with `client_id` at `/token`.
   What binds its code to it is PKCE (S256, required of every client) and the

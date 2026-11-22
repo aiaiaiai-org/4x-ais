@@ -170,10 +170,10 @@ use as issuer, instead of `nilx-one` (owner decision, 2026-11-11). The
 `client_id`, so the rename must happen before AIS goes live and before the
 legacy Bond migration (`nilx-one/core#116`) is activated: that migration
 stores `(iss, pairwise sub)` against an existing Bond, and a later rename
-would orphan every such binding. Today AIS is not deployed and holds no
-identities, so nothing live moves. The rename is its
-own change here, in `deploy/prepare-runtime-env.sh`, and in `nilx-one/core`'s
-client configuration, together.
+would orphan every such binding. Nobody signed in through `nilx-one`, so it
+was retired without a migration (owner decision, 2026-11-22): the registry in
+`deploy/prepare-runtime-env.sh` names only `0x1`, and `nilx-one/core` accepts
+only `0x1`.
 
 ## Telegram Special purchase authorization
 
@@ -220,10 +220,9 @@ Telegram account, limited to this SKU. The limits are enforced by 0x1: the
 price check against the authoritative offer, one result per requesting product
 and order ID, and the current binding check.
 
-Both endpoints fail closed until the registry carries the `0x1` client and the
-grants above: today's production registry still names the client `nilx-one` and
-has no product block, so calls answer 401 or `bond_unlinked`. The rename and the
-grants are a precondition for enabling checkout.
+Both endpoints fail closed until the registry carries the grants above:
+today's production `0x1` client has no product block, so calls answer 401 or
+`bond_unlinked`. The grants are a precondition for enabling checkout.
 
 Development must use its own product grants, issuer and wallet. These endpoints
 alone do not deliver Telegram link reports, relay the purchase to 0x1, or

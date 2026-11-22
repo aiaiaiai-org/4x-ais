@@ -87,26 +87,15 @@ fn the_host_script_writes_an_environment_the_service_accepts() {
     let config = Config::from_lookup(|key| values.get(key).cloned()).expect("the service starts");
     assert_eq!(config.issuer_id(), "https://auth.aiaiaiai.org");
 
-    // 0x1 is registered as a public client on its own callback.
-    let client = &config.clients["nilx-one"];
+    // 0x1 is the only client: public, on its two exact callbacks. The
+    // retired nilx-one client is gone, and nothing claims continuity from it.
+    assert_eq!(config.clients.keys().collect::<Vec<_>>(), ["0x1"]);
+    let client = &config.clients["0x1"];
     assert_eq!(client.secret_sha256, None);
     assert!(client.pub_dress_scope);
+    assert_eq!(client.legacy_subject_client_id, None);
     assert_eq!(
         client.redirect_uris,
-        ["https://nilx.one/api/v1/auth/aiaiaiai/callback"]
-    );
-
-    // Its successor keeps that callback, adds only the Telegram one and
-    // proves subject continuity from it.
-    let successor = &config.clients["0x1"];
-    assert_eq!(successor.secret_sha256, None);
-    assert!(successor.pub_dress_scope);
-    assert_eq!(
-        successor.legacy_subject_client_id.as_deref(),
-        Some("nilx-one")
-    );
-    assert_eq!(
-        successor.redirect_uris,
         [
             "https://nilx.one/api/v1/auth/aiaiaiai/callback",
             crate::config::TELEGRAM_CALLBACK,
