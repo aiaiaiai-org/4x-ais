@@ -17,12 +17,15 @@ use sha2::{Digest as _, Sha256};
 use tower::ServiceExt as _;
 use url::Url;
 
-use crate::{config::Config, router, store::Store};
+use crate::{
+    config::{Config, TELEGRAM_CALLBACK},
+    router,
+    store::Store,
+};
 
 const ISSUER: &str = "https://auth.aiaiaiai.org";
 const HOST_NAME: &str = "auth.aiaiaiai.org";
 const ONE_CALLBACK: &str = "https://nilx.one/api/v1/auth/aiaiaiai/callback";
-const TELEGRAM_CALLBACK: &str = "https://nilx.one/api/v1/telegram/login/callback";
 const PRISM_CALLBACK: &str = "https://prism.aiaiaiai.org/auth/callback";
 const OPEN_CALLBACK: &str = "https://open.example/auth/callback";
 const SECRET: &str = "a-client-secret-of-thirty-two-bytes!";

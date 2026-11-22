@@ -258,12 +258,13 @@ fn parse_clients(value: &str) -> Result<HashMap<String, Client>, ConfigError> {
     Ok(clients)
 }
 
-fn continuity_redirects_match(legacy: &[String], successor: &[String]) -> bool {
-    // Owned by the 0x1 host: nilx-one/core `CALLBACK_PATH` in
-    // crates/nilxone-identity/src/public_info/telegram_login.rs and
-    // docs/runtime.md must change together with this value.
-    const TELEGRAM_CALLBACK: &str = "https://nilx.one/api/v1/telegram/login/callback";
+/// The only callback the 0x1 successor may add to its predecessor's.
+/// Owned by the 0x1 host: nilx-one/core `CALLBACK_PATH` in
+/// crates/nilxone-identity/src/public_info/telegram_login.rs and
+/// docs/runtime.md must change together with this value.
+pub(crate) const TELEGRAM_CALLBACK: &str = "https://nilx.one/api/v1/telegram/login/callback";
 
+fn continuity_redirects_match(legacy: &[String], successor: &[String]) -> bool {
     if legacy == successor {
         return true;
     }
@@ -455,7 +456,7 @@ mod tests {
             }]),
             serde_json::json!([pair[0], {
                 "client_id": "0x1", "name": "0x1", "skin": "cell",
-                "redirect_uris": ["https://nilx.one/api/v1/telegram/login/callback"],
+                "redirect_uris": [TELEGRAM_CALLBACK],
                 "pub_dress": true, "legacy_subject_client_id": "nilx-one"
             }]),
             serde_json::json!([pair[0], {
