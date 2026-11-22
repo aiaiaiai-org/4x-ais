@@ -218,11 +218,21 @@ async fn profile_subject(
     sub: &str,
     priv_id: Option<&str>,
 ) -> Result<Option<[u8; 32]>, crate::store::StoreError> {
-    let binding = state.store.subject_for(&actor.asker, sub).await?;
-    Ok(match priv_id {
-        Some(value) => decode_priv_id(value).filter(|id| Some(*id) == binding),
-        None => binding,
-    })
+    let Some(binding) = state.store.subject_for(&actor.asker, sub).await? else {
+        return Ok(None);
+    };
+    let Some(value) = priv_id else {
+        return Ok(Some(binding));
+    };
+    // A supplied identifier must be the one AIS assigned to this binding.
+    let matches = match (
+        decode_priv_id(value),
+        state.store.bond_priv_id(&binding).await?,
+    ) {
+        (Some(supplied), Some(assigned)) => supplied == assigned,
+        _ => false,
+    };
+    Ok(matches.then_some(binding))
 }
 
 fn valid_profile_target(sub: &str, priv_id: Option<&str>) -> bool {

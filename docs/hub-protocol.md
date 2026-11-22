@@ -230,10 +230,12 @@ activate checkout in any environment.
 
 ## Shared Bond profile
 
-AIS allocates the immutable `priv_id` at registration. The API encodes the
-existing 32-byte AIS identity key as `bond_` followed by 64 lowercase hex
-digits. This value is the same for every authorized product. OIDC `sub`
-continues to identify the signed-in person in the requesting client's scope.
+`priv_id` is 32 random bytes that AIS assigns to a Bond on first use, encoded
+as `bond_` followed by 64 lowercase hex digits. It is stored separately from
+the private subject, derived from no key, and never changes. It is the same for
+every authorized product, so `bond.profile.read` lets those products recognize
+one person across products. The private subject itself never leaves AIS, and
+OIDC `sub` stays pairwise in the requesting client's scope.
 
 - `POST /family/bond/profile` accepts `{subject, priv_id?}`. The first lookup
   can omit `priv_id` and use the product's existing AIS person binding to
