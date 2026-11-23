@@ -68,6 +68,8 @@ struct PendingCode {
     nonce: String,
     subject: String,
     pub_dress: Option<String>,
+    /// The `telegram_binding` claim, when asked for and the person has a link.
+    telegram_binding: Option<String>,
     auth_time: u64,
     expires_at: u64,
 }
@@ -179,8 +181,8 @@ async fn discovery(State(state): State<AppState>) -> Response {
         "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post", "none", "private_key_jwt"],
         "token_endpoint_auth_signing_alg_values_supported": ["EdDSA"],
         "code_challenge_methods_supported": ["S256"],
-        "scopes_supported": ["openid", "pub_dress"],
-        "claims_supported": ["iss", "sub", "aud", "exp", "iat", "auth_time", "nonce", "amr", "pub_dress"],
+        "scopes_supported": ["openid", "pub_dress", "telegram_binding"],
+        "claims_supported": ["iss", "sub", "aud", "exp", "iat", "auth_time", "nonce", "amr", "pub_dress", "telegram_binding"],
     }))
 }
 
@@ -218,6 +220,9 @@ struct AuthorizationRequest {
     nonce: String,
     code_challenge: String,
     pub_dress_scope: bool,
+    /// Defaulted, so a request sealed before this field existed still opens.
+    #[serde(default)]
+    telegram_binding_scope: bool,
     browser: String,
     expires_at: u64,
 }
@@ -371,8 +376,9 @@ async fn authorize(
     if !scopes.contains(&"openid")
         || scopes
             .iter()
-            .any(|scope| !matches!(*scope, "openid" | "pub_dress"))
+            .any(|scope| !matches!(*scope, "openid" | "pub_dress" | "telegram_binding"))
         || (scopes.contains(&"pub_dress") && !client.pub_dress_scope)
+        || (scopes.contains(&"telegram_binding") && !client.telegram_binding_scope)
     {
         return fail("invalid_scope");
     }
@@ -409,6 +415,7 @@ async fn authorize(
         nonce,
         code_challenge,
         pub_dress_scope: scopes.contains(&"pub_dress"),
+        telegram_binding_scope: scopes.contains(&"telegram_binding"),
         browser: browser.clone(),
         expires_at: now + REQUEST_TTL,
     };
@@ -885,6 +892,18 @@ async fn register(ctx: &Ctx<'_>, form: &SubmitForm) -> Response {
     }
 }
 
+/// Proves which Telegram account is linked without disclosing it: only a
+/// client that already knows the account and the nonce can compute it. A
+/// client asks for it only where it knows the account, so it learns nothing.
+pub(crate) fn telegram_binding(nonce: &str, telegram_id: i64) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"ais-telegram-binding-v1\0");
+    digest.update(nonce.as_bytes());
+    digest.update(b"\0");
+    digest.update(telegram_id.to_string().as_bytes());
+    URL_SAFE_NO_PAD.encode(digest.finalize())
+}
+
 fn code_key(code: &str) -> [u8; 32] {
     Sha256::digest(code.as_bytes()).into()
 }
@@ -898,6 +917,24 @@ async fn complete(ctx: &Ctx<'_>, identity: &Identity) -> Response {
         .pairwise_subject(&request.client_id, &identity.subject);
     let Some(code) = random_token(32) else {
         return redirect_error(&request.redirect_uri, "server_error", &request.state);
+    };
+    let telegram_binding = if request.telegram_binding_scope {
+        match ctx
+            .state
+            .store
+            .telegram_for_subject(&identity.subject)
+            .await
+        {
+            Ok(telegram_id) => {
+                telegram_id.map(|telegram_id| telegram_binding(&request.nonce, telegram_id))
+            }
+            Err(error) => {
+                tracing::error!(%error, "Telegram link lookup for sign-in failed");
+                return redirect_error(&request.redirect_uri, "server_error", &request.state);
+            }
+        }
+    } else {
+        None
     };
     // Kept before the code exists, so every subject a client can hold is one
     // AIS can find the person by again.
@@ -929,6 +966,7 @@ async fn complete(ctx: &Ctx<'_>, identity: &Identity) -> Response {
                 nonce: request.nonce.clone(),
                 subject,
                 pub_dress: request.pub_dress_scope.then(|| identity.pub_dress.clone()),
+                telegram_binding,
                 auth_time: ctx.now,
                 expires_at: ctx.now + CODE_TTL,
             },
@@ -1040,6 +1078,9 @@ async fn token(
     });
     if let Some(pub_dress) = pending.pub_dress {
         claims["pub_dress"] = serde_json::Value::String(pub_dress);
+    }
+    if let Some(binding) = pending.telegram_binding {
+        claims["telegram_binding"] = serde_json::Value::String(binding);
     }
     let id_token = sign_jwt(&state.config.signing_key, &state.config.key_id, &claims);
     // OIDC requires an access token in the response. No resource accepts it

@@ -61,7 +61,8 @@ set of secrets and a service whose every identifier has changed.
       "https://nilx.one/api/v1/auth/aiaiaiai/callback",
       "https://nilx.one/api/v1/telegram/login/callback"
     ],
-    "pub_dress": true
+    "pub_dress": true,
+    "telegram_binding": true
   }
 ]
 ```
@@ -69,6 +70,15 @@ set of secrets and a service whose every identifier has changed.
 - **`skin`** is presentation only. `cell` shows the whole prefix `0x0`–`0xf` as
   one choice; `slug` shows the name alone, and AIS assigns the prefix.
 - **`pub_dress`** allows the client to ask for the address in the token.
+- **`telegram_binding`** allows the client to ask for the scope of the same
+  name. With it, the ID token carries `telegram_binding` when the person has a
+  linked Telegram account: base64url (unpadded) of
+  `SHA-256("ais-telegram-binding-v1" 0x00 nonce 0x00 decimal-telegram-id)`.
+  It never carries the account id. A client asks for it only on a login that
+  already names the Telegram account, such as a chat `/login`. There it compares
+  the claim with the account it expects and learns nothing new. No product key
+  or client credential is involved: the claim rides in the ID token that the
+  client already verifies.
 - **One client per product.** `0x1` is registered alone; the `nilx-one`
   client was retired before anyone signed in through it (owner decision,
   2026-11-22). AIS signs no alias between clients: each pairwise `sub` stands

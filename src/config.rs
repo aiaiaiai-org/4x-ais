@@ -58,6 +58,9 @@ struct ClientRecord {
     secret_sha256: Option<String>,
     #[serde(default)]
     pub_dress: bool,
+    /// Allows the `telegram_binding` scope (docs/runtime.md).
+    #[serde(default)]
+    telegram_binding: bool,
     /// Present for a family product that may ask for product tokens.
     #[serde(default)]
     product: Option<ProductRecord>,
@@ -95,6 +98,8 @@ pub struct Client {
     /// redirect URI are what bind a code to it.
     pub secret_sha256: Option<[u8; 32]>,
     pub pub_dress_scope: bool,
+    /// May ask for the nonce-bound `telegram_binding` claim.
+    pub telegram_binding_scope: bool,
     /// `Some` for a family product: its keys and token grants.
     pub product: Option<Product>,
 }
@@ -278,6 +283,7 @@ impl TryFrom<ClientRecord> for Client {
             redirect_uris: record.redirect_uris,
             secret_sha256,
             pub_dress_scope: record.pub_dress,
+            telegram_binding_scope: record.telegram_binding,
             product,
         })
     }
