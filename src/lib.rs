@@ -7,6 +7,7 @@
 pub mod config;
 pub mod crypto;
 pub mod family;
+pub mod h3_cell;
 pub mod issuer;
 pub mod limiter;
 pub mod page;

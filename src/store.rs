@@ -7,7 +7,9 @@
 
 use std::str::FromStr as _;
 
-use nilxone_contracts::{GeoCoordinate, PubDress, PubDressLabel};
+use nilxone_contracts::{PubDress, PubDressLabel};
+
+use crate::h3_cell::H3Cell;
 use sqlx::{
     Row as _, SqlitePool,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
@@ -35,12 +37,10 @@ CREATE TABLE IF NOT EXISTS identities (
 CREATE TABLE IF NOT EXISTS bond_context (
     subject BLOB PRIMARY KEY NOT NULL REFERENCES identities(subject) ON DELETE CASCADE,
     localization TEXT,
-    longitude_e7 INTEGER,
-    latitude_e7 INTEGER,
-    revision INTEGER NOT NULL CHECK (revision > 0),
-    CHECK ((longitude_e7 IS NULL) = (latitude_e7 IS NULL)),
-    CHECK (longitude_e7 BETWEEN -1800000000 AND 1800000000),
-    CHECK (latitude_e7 BETWEEN -900000000 AND 900000000)
+    -- The base location only: one H3 cell at resolution 8. Precise positions
+    -- stay with the product that measured them.
+    h3_cell TEXT CHECK (h3_cell IS NULL OR length(h3_cell) = 15),
+    revision INTEGER NOT NULL CHECK (revision > 0)
 ) STRICT;
 
 CREATE TRIGGER IF NOT EXISTS identities_subject_immutable
@@ -152,13 +152,13 @@ pub(crate) struct BondProfile {
     priv_id: String,
     pub_dress: String,
     localization: Option<String>,
-    location: Option<GeoCoordinate>,
+    location: Option<H3Cell>,
     revision: i64,
 }
 
 pub(crate) struct BondContextUpdate {
     pub(crate) localization: Option<String>,
-    pub(crate) location: Option<GeoCoordinate>,
+    pub(crate) location: Option<H3Cell>,
     pub(crate) expected_revision: i64,
 }
 
@@ -198,7 +198,7 @@ async fn read_bond_profile(
     subject: &[u8; 32],
 ) -> Result<Option<BondProfile>, StoreError> {
     let row = sqlx::query(
-        "SELECT i.pub_dress, c.localization, c.longitude_e7, c.latitude_e7, \
+        "SELECT i.pub_dress, c.localization, c.h3_cell, \
          COALESCE(c.revision, 0) AS revision FROM identities i \
          LEFT JOIN bond_context c ON c.subject = i.subject WHERE i.subject = ?",
     )
@@ -208,17 +208,11 @@ async fn read_bond_profile(
     let Some(row) = row else {
         return Ok(None);
     };
-    let location = match (
-        row.try_get::<Option<i32>, _>("longitude_e7")?,
-        row.try_get::<Option<i32>, _>("latitude_e7")?,
-    ) {
-        (None, None) => None,
-        (Some(lon), Some(lat)) => Some(
-            GeoCoordinate::new(lon, lat)
-                .map_err(|_| sqlx::Error::Protocol("stored Bond location is invalid".into()))?,
-        ),
-        _ => return Err(sqlx::Error::Protocol("incomplete Bond location".into()).into()),
-    };
+    let location = row
+        .try_get::<Option<String>, _>("h3_cell")?
+        .map(|cell| cell.parse::<H3Cell>())
+        .transpose()
+        .map_err(|_| sqlx::Error::Protocol("stored Bond location is invalid".into()))?;
     let priv_id = ensure_priv_id(connection, subject).await?;
     Ok(Some(BondProfile {
         priv_id: encode_priv_id(&priv_id),
@@ -311,15 +305,14 @@ impl Store {
             .checked_add(1)
             .ok_or_else(|| sqlx::Error::Protocol("Bond context revision exhausted".into()))?;
         sqlx::query(
-            "INSERT INTO bond_context (subject, localization, longitude_e7, latitude_e7, revision) \
-             VALUES (?, ?, ?, ?, ?) ON CONFLICT(subject) DO UPDATE SET \
-             localization = excluded.localization, longitude_e7 = excluded.longitude_e7, \
-             latitude_e7 = excluded.latitude_e7, revision = excluded.revision",
+            "INSERT INTO bond_context (subject, localization, h3_cell, revision) \
+             VALUES (?, ?, ?, ?) ON CONFLICT(subject) DO UPDATE SET \
+             localization = excluded.localization, h3_cell = excluded.h3_cell, \
+             revision = excluded.revision",
         )
         .bind(subject.as_slice())
         .bind(update.localization)
-        .bind(update.location.map(GeoCoordinate::longitude_e7))
-        .bind(update.location.map(GeoCoordinate::latitude_e7))
+        .bind(update.location.map(|cell| cell.to_string()))
         .bind(revision)
         .execute(&mut *tx)
         .await?;
