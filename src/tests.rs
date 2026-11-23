@@ -1659,7 +1659,11 @@ async fn registered_bond_profile_uses_one_priv_id_across_products() {
     assert!(first["localization"].is_null());
     assert!(first["location"].is_null());
 
-    let location = json!({ "latitude_e7": "504500000", "longitude_e7": "305234000" });
+    // The base location is one H3 cell at resolution 8 (Kyiv, Maidan).
+    let cell = h3o::LatLng::new(50.4501, 30.5234)
+        .unwrap()
+        .to_cell(h3o::Resolution::Eight);
+    let location = json!(format!("{:x}", u64::from(cell)));
     let update = json!({ "subject": one_sub, "priv_id": id, "expected_revision": 0,
                          "localization": "uk-UA", "location": location });
     let reply = post_json(&app, context, &one_write, update.clone()).await;
@@ -1680,6 +1684,30 @@ async fn registered_bond_profile_uses_one_priv_id_across_products() {
         post_json(&app, context, &one_write, update).await.status,
         StatusCode::CONFLICT
     );
+    // A precise position, or a cell at any other resolution, never reaches AIS.
+    let finer = format!(
+        "{:x}",
+        u64::from(cell.center_child(h3o::Resolution::Nine).unwrap())
+    );
+    for precise in [
+        json!({ "latitude_e7": "504500000", "longitude_e7": "305234000" }),
+        json!(finer),
+        json!("50.4501,30.5234"),
+    ] {
+        let refused = post_json(
+            &app,
+            context,
+            &one_write,
+            json!({ "subject": one_sub, "priv_id": id, "expected_revision": 1,
+                    "localization": "uk-UA", "location": precise }),
+        )
+        .await;
+        assert_eq!(
+            refused.status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{precise}"
+        );
+    }
     assert_eq!(
         post_json(
             &app,

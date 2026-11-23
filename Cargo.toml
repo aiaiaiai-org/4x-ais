@@ -31,6 +31,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 unicode-normalization = "0.1"
 url = "2"
+h3o = { version = "0.11", default-features = false }
 
 [dev-dependencies]
 # The 0x1 client's own verifier, so tests prove the token contract it relies on.

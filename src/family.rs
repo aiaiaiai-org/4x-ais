@@ -16,7 +16,9 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::Response,
 };
-use nilxone_contracts::{GeoCoordinate, PubDress};
+use nilxone_contracts::PubDress;
+
+use crate::h3_cell::H3Cell;
 use serde::{Deserialize, Deserializer};
 
 use crate::{
@@ -185,7 +187,7 @@ pub(crate) struct ContextReport {
     #[serde(deserialize_with = "nullable")]
     localization: Option<String>,
     #[serde(deserialize_with = "nullable")]
-    location: Option<GeoCoordinate>,
+    location: Option<H3Cell>,
 }
 
 fn nullable<'de, D, T>(decoder: D) -> Result<Option<T>, D::Error>

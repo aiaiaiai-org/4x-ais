@@ -66,8 +66,10 @@ Only what makes a person one person across products:
 - the OpenID Connect issuer: authorization code + PKCE (S256), pairwise `sub`
   per client, EdDSA `id_token`s, discovery and JWKS.
 
-It owns no game state. Avaia, locations, seeds, xPing and businesses belong to 0x1
-and stay there.
+It owns no game state. Avaia, precise locations, seeds, xPing and businesses
+belong to 0x1 and stay there. AIS keeps only a Bond's base location, one H3
+cell at resolution 8, which 0x1 reports when the cell changes
+([hub protocol](hub-protocol.md)).
 
 ## Stack
 

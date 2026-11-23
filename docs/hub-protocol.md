@@ -244,13 +244,24 @@ OIDC `sub` stays pairwise in the requesting client's scope.
 - `POST /family/bond/context` accepts
   `{subject, priv_id, expected_revision, localization, location}`. The two
   context fields must be explicit. Use `null` to clear one. Localization
-  carries a bounded language tag such as `uk-UA`. Location uses the Core
-  WGS84 E7 coordinate representation with decimal string components. The
-  context stores only the current explicitly supplied location.
+  carries a bounded language tag such as `uk-UA`. Location is the Bond's
+  base location: one H3 cell at resolution 8 (a few city blocks), written as
+  its canonical 15-digit lowercase hex index, e.g. `881e6384a3fffff`. AIS
+  refuses coordinates and cells at any other resolution, and stores only the
+  current cell.
 - Responses return `{priv_id, pub_dress, localization, location, revision}`
   with `Cache-Control: no-store`. AIS reads the current public address from
   the identity registry. Revision starts at zero. Competing updates to the
   same revision receive a conflict and can reread before retrying.
+
+### Location precision (owner decision, 2026-11-23)
+
+`priv_id` is the one identifier of a person across every identity and
+product. The base location that travels with it is coarse on purpose: the H3
+resolution 8 cell is what AIS shares across the family (h-ua-bot, Prism and
+other clients). 0x1 keeps the Bond's precise position, to the centimetre and
+with its heading, inside 0x1 only; it reports the resolution 8 cell to AIS
+when that cell changes, and nothing finer ever leaves 0x1.
 
 The relay needs the appropriate `bond.profile.read` or `bond.profile.write`
 scope for audience `ais`. The acting product must independently hold that
