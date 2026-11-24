@@ -2393,6 +2393,11 @@ fn token_payload(token: &str) -> serde_json::Value {
 #[tokio::test]
 async fn the_telegram_binding_answers_only_whether_the_named_account_is_linked() {
     use crate::issuer::telegram_binding_hint as hint;
+    // The same vector as nilx-one/core `telegram_binding_hint`.
+    assert_eq!(
+        hint("nonce-1", 4242),
+        "UDbC6i0zJM5f9ja2EjMjAQ-06Jde25hEOetHxM5Ua6c"
+    );
     let store = Store::connect("sqlite::memory:").await.expect("store");
     let app = app_with_store(store.clone());
     let (_, created) = register_cell(&app, "0", "bound").await;
