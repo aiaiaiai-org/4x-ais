@@ -71,6 +71,7 @@ struct PendingCode {
     /// Whether the person's linked Telegram account is the one the request
     /// named in `telegram_binding_hint`.
     telegram_binding: bool,
+    telegram_binding_hint: Option<String>,
     auth_time: u64,
     expires_at: u64,
 }
@@ -1003,6 +1004,7 @@ async fn complete(ctx: &Ctx<'_>, identity: &Identity) -> Response {
                 subject,
                 pub_dress: request.pub_dress_scope.then(|| identity.pub_dress.clone()),
                 telegram_binding,
+                telegram_binding_hint: request.telegram_binding_hint.clone(),
                 auth_time: ctx.now,
                 expires_at: ctx.now + CODE_TTL,
             },
@@ -1048,6 +1050,7 @@ struct TokenForm {
     audience: Option<String>,
     scope: Option<String>,
     actor: Option<String>,
+    telegram_binding_hint: Option<String>,
 }
 
 async fn token(
@@ -1115,7 +1118,13 @@ async fn token(
     if let Some(pub_dress) = pending.pub_dress {
         claims["pub_dress"] = serde_json::Value::String(pub_dress);
     }
-    if pending.telegram_binding {
+    if pending.telegram_binding
+        && pending.telegram_binding_hint.as_deref().is_some_and(|hint| {
+            form.telegram_binding_hint.as_deref().is_some_and(|expected| {
+                bool::from(hint.as_bytes().ct_eq(expected.as_bytes()))
+            })
+        })
+    {
         claims["telegram_binding"] = serde_json::Value::Bool(true);
     }
     let id_token = sign_jwt(&state.config.signing_key, &state.config.key_id, &claims);

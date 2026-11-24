@@ -77,7 +77,9 @@ set of secrets and a service whose every identifier has changed.
   `SHA-256("ais-telegram-binding-hint-v1" 0x00 nonce 0x00 decimal-telegram-id)`
   for the account the client expects, here the sender of `/login`. The ID
   token then carries `"telegram_binding": true` if and only if the person's
-  linked Telegram account is that account. Otherwise the claim is absent.
+  linked Telegram account is that account and the PKCE code exchange supplies
+  the same `telegram_binding_hint` in the token request. Otherwise the claim
+  is absent.
 
   What this guarantees: AIS discloses one bit about an account the client
   already named, never the linked account or anything derived from it. A

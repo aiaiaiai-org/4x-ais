@@ -234,12 +234,24 @@ impl Flow {
     }
 
     async fn exchange(&self, app: &Router, code: &str) -> Reply {
+        self.exchange_with_binding(app, code, None).await
+    }
+
+    async fn exchange_with_binding(
+        &self,
+        app: &Router,
+        code: &str,
+        binding_hint: Option<&str>,
+    ) -> Reply {
         let mut pairs = vec![
             ("grant_type", "authorization_code"),
             ("code", code),
             ("redirect_uri", self.callback),
             ("code_verifier", VERIFIER),
         ];
+        if let Some(hint) = binding_hint {
+            pairs.push(("telegram_binding_hint", hint));
+        }
         let mut request = Request::post("/token")
             .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
         if self.client_id == "open-app" || self.client_id == "0x1" {
@@ -2339,6 +2351,15 @@ fn binding_authorize_url(
 
 /// Signs in to 0x1 on the Telegram callback and returns the raw ID token.
 async fn telegram_sign_in_token(app: &Router, nonce: &str, hint: Option<&str>) -> String {
+    telegram_sign_in_token_with_exchange_hint(app, nonce, hint, hint).await
+}
+
+async fn telegram_sign_in_token_with_exchange_hint(
+    app: &Router,
+    nonce: &str,
+    hint: Option<&str>,
+    exchange_hint: Option<&str>,
+) -> String {
     let scope = if hint.is_some() {
         "openid pub_dress telegram_binding"
     } else {
@@ -2375,7 +2396,9 @@ async fn telegram_sign_in_token(app: &Router, nonce: &str, hint: Option<&str>) -
         )
         .await;
     let back = location(&signed_in.headers);
-    let response = flow.exchange(app, &query(&back, "code").unwrap()).await;
+    let response = flow
+        .exchange_with_binding(app, &query(&back, "code").unwrap(), exchange_hint)
+        .await;
     assert_eq!(response.status, StatusCode::OK, "{}", response.body);
     let token: serde_json::Value = serde_json::from_str(&response.body).unwrap();
     token["id_token"].as_str().unwrap().to_owned()
@@ -2446,6 +2469,15 @@ async fn the_telegram_binding_answers_only_whether_the_named_account_is_linked()
             .keys()
             .all(|key| known.contains(&key.as_str()))
     );
+
+    // The original candidate must also be supplied at PKCE code exchange.
+    let different = hint(nonce, 4243);
+    for exchange_hint in [None, Some(different.as_str())] {
+        let token =
+            telegram_sign_in_token_with_exchange_hint(&app, nonce, Some(&named), exchange_hint)
+                .await;
+        assert!(token_payload(&token).get("telegram_binding").is_none());
+    }
 
     // Another account, or the right account under another nonce: no claim.
     let nonce = "nonce-other-account-12345";
