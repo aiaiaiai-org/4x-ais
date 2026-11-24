@@ -1119,11 +1119,14 @@ async fn token(
         claims["pub_dress"] = serde_json::Value::String(pub_dress);
     }
     if pending.telegram_binding
-        && pending.telegram_binding_hint.as_deref().is_some_and(|hint| {
-            form.telegram_binding_hint.as_deref().is_some_and(|expected| {
-                bool::from(hint.as_bytes().ct_eq(expected.as_bytes()))
+        && pending
+            .telegram_binding_hint
+            .as_deref()
+            .is_some_and(|hint| {
+                form.telegram_binding_hint
+                    .as_deref()
+                    .is_some_and(|expected| bool::from(hint.as_bytes().ct_eq(expected.as_bytes())))
             })
-        })
     {
         claims["telegram_binding"] = serde_json::Value::Bool(true);
     }
