@@ -68,8 +68,9 @@ struct PendingCode {
     nonce: String,
     subject: String,
     pub_dress: Option<String>,
-    /// The `telegram_binding` claim, when asked for and the person has a link.
-    telegram_binding: Option<String>,
+    /// Whether the person's linked Telegram account is the one the request
+    /// named in `telegram_binding_hint`.
+    telegram_binding: bool,
     auth_time: u64,
     expires_at: u64,
 }
@@ -209,6 +210,7 @@ struct AuthorizeQuery {
     nonce: Option<String>,
     code_challenge: Option<String>,
     code_challenge_method: Option<String>,
+    telegram_binding_hint: Option<String>,
 }
 
 /// A validated request, carried through the page as a sealed form field.
@@ -220,9 +222,10 @@ struct AuthorizationRequest {
     nonce: String,
     code_challenge: String,
     pub_dress_scope: bool,
-    /// Defaulted, so a request sealed before this field existed still opens.
+    /// The hint of a `telegram_binding` request. Defaulted, so a request
+    /// sealed before this field existed still opens.
     #[serde(default)]
-    telegram_binding_scope: bool,
+    telegram_binding_hint: Option<String>,
     browser: String,
     expires_at: u64,
 }
@@ -378,10 +381,29 @@ async fn authorize(
             .iter()
             .any(|scope| !matches!(*scope, "openid" | "pub_dress" | "telegram_binding"))
         || (scopes.contains(&"pub_dress") && !client.pub_dress_scope)
-        || (scopes.contains(&"telegram_binding") && !client.telegram_binding_scope)
     {
         return fail("invalid_scope");
     }
+    // The binding answers only the client's Telegram chat login, and only
+    // for the one account that request names.
+    let telegram_binding_hint = if scopes.contains(&"telegram_binding") {
+        if client.telegram_binding_redirect_uri.as_deref() != Some(redirect_uri.as_str()) {
+            return fail("invalid_scope");
+        }
+        match query
+            .telegram_binding_hint
+            .clone()
+            .filter(|hint| is_binding_digest(hint))
+        {
+            Some(hint) => Some(hint),
+            None => return fail("invalid_request"),
+        }
+    } else {
+        if query.telegram_binding_hint.is_some() {
+            return fail("invalid_request");
+        }
+        None
+    };
     let Some(nonce) = query
         .nonce
         .clone()
@@ -415,7 +437,7 @@ async fn authorize(
         nonce,
         code_challenge,
         pub_dress_scope: scopes.contains(&"pub_dress"),
-        telegram_binding_scope: scopes.contains(&"telegram_binding"),
+        telegram_binding_hint,
         browser: browser.clone(),
         expires_at: now + REQUEST_TTL,
     };
@@ -892,16 +914,26 @@ async fn register(ctx: &Ctx<'_>, form: &SubmitForm) -> Response {
     }
 }
 
-/// Proves which Telegram account is linked without disclosing it: only a
-/// client that already knows the account and the nonce can compute it. A
-/// client asks for it only where it knows the account, so it learns nothing.
-pub(crate) fn telegram_binding(nonce: &str, telegram_id: i64) -> String {
+/// The hint a client sends with `telegram_binding`: it names the Telegram
+/// account the client expects for this sign-in. AIS answers only whether the
+/// person's linked account is that one, so the client learns one bit about an
+/// account it already named and nothing else. The hint itself travels in the
+/// authorization URL next to the nonce, so anyone who sees that URL can test
+/// guesses of the account id against it.
+pub(crate) fn telegram_binding_hint(nonce: &str, telegram_id: i64) -> String {
     let mut digest = Sha256::new();
-    digest.update(b"ais-telegram-binding-v1\0");
+    digest.update(b"ais-telegram-binding-hint-v1\0");
     digest.update(nonce.as_bytes());
     digest.update(b"\0");
     digest.update(telegram_id.to_string().as_bytes());
     URL_SAFE_NO_PAD.encode(digest.finalize())
+}
+
+fn is_binding_digest(value: &str) -> bool {
+    value.len() == 43
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
 fn code_key(code: &str) -> [u8; 32] {
@@ -918,23 +950,27 @@ async fn complete(ctx: &Ctx<'_>, identity: &Identity) -> Response {
     let Some(code) = random_token(32) else {
         return redirect_error(&request.redirect_uri, "server_error", &request.state);
     };
-    let telegram_binding = if request.telegram_binding_scope {
+    let telegram_binding = if let Some(hint) = &request.telegram_binding_hint {
         match ctx
             .state
             .store
             .telegram_for_subject(&identity.subject)
             .await
         {
-            Ok(telegram_id) => {
-                telegram_id.map(|telegram_id| telegram_binding(&request.nonce, telegram_id))
-            }
+            Ok(telegram_id) => telegram_id.is_some_and(|telegram_id| {
+                bool::from(
+                    telegram_binding_hint(&request.nonce, telegram_id)
+                        .as_bytes()
+                        .ct_eq(hint.as_bytes()),
+                )
+            }),
             Err(error) => {
                 tracing::error!(%error, "Telegram link lookup for sign-in failed");
                 return redirect_error(&request.redirect_uri, "server_error", &request.state);
             }
         }
     } else {
-        None
+        false
     };
     // Kept before the code exists, so every subject a client can hold is one
     // AIS can find the person by again.
@@ -1079,8 +1115,8 @@ async fn token(
     if let Some(pub_dress) = pending.pub_dress {
         claims["pub_dress"] = serde_json::Value::String(pub_dress);
     }
-    if let Some(binding) = pending.telegram_binding {
-        claims["telegram_binding"] = serde_json::Value::String(binding);
+    if pending.telegram_binding {
+        claims["telegram_binding"] = serde_json::Value::Bool(true);
     }
     let id_token = sign_jwt(&state.config.signing_key, &state.config.key_id, &claims);
     // OIDC requires an access token in the response. No resource accepts it

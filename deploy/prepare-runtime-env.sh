@@ -116,9 +116,10 @@ trap 'rm -f "$next_env"' EXIT HUP INT TERM
   printf 'AIS_SECRET=%s\n' "$secret"
   printf 'AIS_PASSWORD_PEPPER=%s\n' "$pepper"
   # 0x1 is a public client: no secret, only PKCE and exact callbacks: the
-  # browser sign-in and the Telegram login. telegram_binding lets the Telegram
-  # login prove the linked account without a product key.
-  printf 'AIS_CLIENTS=%s\n' '[{"client_id":"0x1","name":"0x1","skin":"cell","redirect_uris":["https://nilx.one/api/v1/auth/aiaiaiai/callback","https://nilx.one/api/v1/telegram/login/callback"],"pub_dress":true,"telegram_binding":true}]'
+  # browser sign-in and the Telegram login. telegram_binding_redirect_uri lets that
+  # Telegram login, and nothing else, ask whether the linked account is the
+  # one it names, without a product key.
+  printf 'AIS_CLIENTS=%s\n' '[{"client_id":"0x1","name":"0x1","skin":"cell","redirect_uris":["https://nilx.one/api/v1/auth/aiaiaiai/callback","https://nilx.one/api/v1/telegram/login/callback"],"pub_dress":true,"telegram_binding_redirect_uri":"https://nilx.one/api/v1/telegram/login/callback"}]'
 } >"$next_env"
 chmod 0600 "$next_env"
 mv "$next_env" "$runtime_env"

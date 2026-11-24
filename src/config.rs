@@ -58,9 +58,10 @@ struct ClientRecord {
     secret_sha256: Option<String>,
     #[serde(default)]
     pub_dress: bool,
-    /// Allows the `telegram_binding` scope (docs/runtime.md).
+    /// The one redirect URI on which the `telegram_binding` scope may be
+    /// asked for: the client's Telegram chat login (docs/runtime.md).
     #[serde(default)]
-    telegram_binding: bool,
+    telegram_binding_redirect_uri: Option<String>,
     /// Present for a family product that may ask for product tokens.
     #[serde(default)]
     product: Option<ProductRecord>,
@@ -98,8 +99,9 @@ pub struct Client {
     /// redirect URI are what bind a code to it.
     pub secret_sha256: Option<[u8; 32]>,
     pub pub_dress_scope: bool,
-    /// May ask for the nonce-bound `telegram_binding` claim.
-    pub telegram_binding_scope: bool,
+    /// The redirect URI of the client's Telegram chat login, the only
+    /// request that may ask for `telegram_binding`.
+    pub telegram_binding_redirect_uri: Option<String>,
     /// `Some` for a family product: its keys and token grants.
     pub product: Option<Product>,
 }
@@ -264,6 +266,13 @@ impl TryFrom<ClientRecord> for Client {
                 return Err(format!("{id}: redirect URIs must be normalized https URLs"));
             }
         }
+        if let Some(uri) = &record.telegram_binding_redirect_uri
+            && !record.redirect_uris.contains(uri)
+        {
+            return Err(format!(
+                "{id}: telegram_binding_redirect_uri must be one of the redirect URIs"
+            ));
+        }
         let secret_sha256 = record
             .secret_sha256
             .as_deref()
@@ -283,7 +292,7 @@ impl TryFrom<ClientRecord> for Client {
             redirect_uris: record.redirect_uris,
             secret_sha256,
             pub_dress_scope: record.pub_dress,
-            telegram_binding_scope: record.telegram_binding,
+            telegram_binding_redirect_uri: record.telegram_binding_redirect_uri,
             product,
         })
     }
