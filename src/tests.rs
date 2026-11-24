@@ -62,7 +62,7 @@ fn app_with_store(store: Store) -> Router {
           "product": { "keys": [{ "kid": "o1", "x": public_key(ONE_KEY) }] } },
         // 0x1 as in production, plus test-only product grants.
         { "client_id": "0x1", "name": "0x1", "skin": "cell", "redirect_uris": [ONE_CALLBACK, TELEGRAM_CALLBACK],
-          "pub_dress": true,
+          "pub_dress": true, "telegram_binding_redirect_uri": TELEGRAM_CALLBACK,
           "product": { "keys": [{ "kid": "o1", "x": public_key(ONE_KEY) }],
                        "tokens": { "prism-hub": ["telegram.link.put", "bond.profile.read", "bond.profile.write"], "ais": ["telegram.identity.resolve"] } } },
         { "client_id": "prism", "name": "Prism", "skin": "slug", "redirect_uris": [PRISM_CALLBACK],
@@ -234,12 +234,24 @@ impl Flow {
     }
 
     async fn exchange(&self, app: &Router, code: &str) -> Reply {
+        self.exchange_with_binding(app, code, None).await
+    }
+
+    async fn exchange_with_binding(
+        &self,
+        app: &Router,
+        code: &str,
+        binding_hint: Option<&str>,
+    ) -> Reply {
         let mut pairs = vec![
             ("grant_type", "authorization_code"),
             ("code", code),
             ("redirect_uri", self.callback),
             ("code_verifier", VERIFIER),
         ];
+        if let Some(hint) = binding_hint {
+            pairs.push(("telegram_binding_hint", hint));
+        }
         let mut request = Request::post("/token")
             .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
         if self.client_id == "open-app" || self.client_id == "0x1" {
@@ -2311,4 +2323,230 @@ async fn telegram_identity_proof_requires_direct_scoped_token_and_existing_bond(
     )
     .await;
     assert_eq!(invalid_request.status, StatusCode::BAD_REQUEST);
+}
+
+fn binding_authorize_url(
+    client_id: &str,
+    callback: &str,
+    scope: &str,
+    nonce: &str,
+    hint: Option<&str>,
+) -> String {
+    let mut url = Url::parse(&format!("{ISSUER}/authorize")).unwrap();
+    url.query_pairs_mut()
+        .append_pair("response_type", "code")
+        .append_pair("client_id", client_id)
+        .append_pair("redirect_uri", callback)
+        .append_pair("scope", scope)
+        .append_pair("state", "the-state")
+        .append_pair("nonce", nonce)
+        .append_pair("code_challenge", &code_challenge(VERIFIER))
+        .append_pair("code_challenge_method", "S256");
+    if let Some(hint) = hint {
+        url.query_pairs_mut()
+            .append_pair("telegram_binding_hint", hint);
+    }
+    format!("/authorize?{}", url.query().unwrap())
+}
+
+/// Signs in to 0x1 on the Telegram callback and returns the raw ID token.
+async fn telegram_sign_in_token(app: &Router, nonce: &str, hint: Option<&str>) -> String {
+    telegram_sign_in_token_with_exchange_hint(app, nonce, hint, hint).await
+}
+
+async fn telegram_sign_in_token_with_exchange_hint(
+    app: &Router,
+    nonce: &str,
+    hint: Option<&str>,
+    exchange_hint: Option<&str>,
+) -> String {
+    let scope = if hint.is_some() {
+        "openid pub_dress telegram_binding"
+    } else {
+        "openid pub_dress"
+    };
+    let reply = send(
+        app,
+        get(&binding_authorize_url(
+            "0x1",
+            TELEGRAM_CALLBACK,
+            scope,
+            nonce,
+            hint,
+        )),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let flow = Flow {
+        client_id: "0x1",
+        callback: TELEGRAM_CALLBACK,
+        nonce: nonce.to_owned(),
+        request: hidden(&reply.body, "request"),
+        cookie: set_cookie(&reply.headers, "__Host-ais_authz").expect("browser cookie"),
+        page: reply.body,
+    };
+    let signed_in = flow
+        .post(
+            app,
+            &[
+                ("step", "sign_in"),
+                ("pub_dress", "0x0bound"),
+                ("password", PASSWORD),
+            ],
+        )
+        .await;
+    let back = location(&signed_in.headers);
+    let response = flow
+        .exchange_with_binding(app, &query(&back, "code").unwrap(), exchange_hint)
+        .await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+    let token: serde_json::Value = serde_json::from_str(&response.body).unwrap();
+    token["id_token"].as_str().unwrap().to_owned()
+}
+
+fn token_payload(token: &str) -> serde_json::Value {
+    serde_json::from_slice(
+        &base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(token.split('.').nth(1).unwrap())
+            .unwrap(),
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+async fn the_telegram_binding_answers_only_whether_the_named_account_is_linked() {
+    use crate::issuer::telegram_binding_hint as hint;
+    // The same vector as nilx-one/core `telegram_binding_hint`.
+    assert_eq!(
+        hint("nonce-1", 4242),
+        "UDbC6i0zJM5f9ja2EjMjAQ-06Jde25hEOetHxM5Ua6c"
+    );
+    let store = Store::connect("sqlite::memory:").await.expect("store");
+    let app = app_with_store(store.clone());
+    let (_, created) = register_cell(&app, "0", "bound").await;
+    assert_eq!(created.status, StatusCode::SEE_OTHER, "{}", created.body);
+
+    // No Telegram account is linked yet: no claim, whatever the hint names.
+    let nonce = "nonce-unlinked-telegram-1";
+    let token = telegram_sign_in_token(&app, nonce, Some(&hint(nonce, 4242))).await;
+    assert!(token_payload(&token).get("telegram_binding").is_none());
+
+    let person = store
+        .find(&<nilxone_contracts::PubDress as std::str::FromStr>::from_str("0x0bound").unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    store
+        .put_telegram_link(&person.subject, Some(4242), 1)
+        .await
+        .unwrap();
+
+    // The named account is the linked one: one bit, `true`.
+    let nonce = "nonce-linked-telegram-12345";
+    let named = hint(nonce, 4242);
+    let token = telegram_sign_in_token(&app, nonce, Some(&named)).await;
+    let claims = token_payload(&token);
+    assert_eq!(claims["telegram_binding"], serde_json::Value::Bool(true));
+    // Nothing derived from the linked account other than that bit.
+    assert!(!token.contains(&named));
+    assert!(!claims.to_string().contains("4242"));
+    let known = [
+        "iss",
+        "sub",
+        "aud",
+        "exp",
+        "iat",
+        "auth_time",
+        "nonce",
+        "amr",
+        "pub_dress",
+        "telegram_binding",
+    ];
+    assert!(
+        claims
+            .as_object()
+            .unwrap()
+            .keys()
+            .all(|key| known.contains(&key.as_str()))
+    );
+
+    // The original candidate must also be supplied at PKCE code exchange.
+    let different = hint(nonce, 4243);
+    for exchange_hint in [None, Some(different.as_str())] {
+        let token =
+            telegram_sign_in_token_with_exchange_hint(&app, nonce, Some(&named), exchange_hint)
+                .await;
+        assert!(token_payload(&token).get("telegram_binding").is_none());
+    }
+
+    // Another account, or the right account under another nonce: no claim.
+    let nonce = "nonce-other-account-12345";
+    let token = telegram_sign_in_token(&app, nonce, Some(&hint(nonce, 4243))).await;
+    assert!(token_payload(&token).get("telegram_binding").is_none());
+    let nonce = "nonce-replayed-hint-123456";
+    let token = telegram_sign_in_token(&app, nonce, Some(&named)).await;
+    assert!(token_payload(&token).get("telegram_binding").is_none());
+
+    // Not asked for: no claim, even with a link.
+    let token = telegram_sign_in_token(&app, "nonce-not-asked-for-1", None).await;
+    assert!(token_payload(&token).get("telegram_binding").is_none());
+}
+
+#[tokio::test]
+async fn the_telegram_binding_is_refused_outside_the_chat_login_context() {
+    let app = app().await;
+    let scope = "openid pub_dress telegram_binding";
+    let nonce = "nonce-refused-context-1";
+    let good_hint = crate::issuer::telegram_binding_hint(nonce, 42);
+    for (client, callback, scope, hint, error) in [
+        // 0x1's browser sign-in is not its Telegram chat login.
+        (
+            "0x1",
+            ONE_CALLBACK,
+            scope,
+            Some(good_hint.as_str()),
+            "invalid_scope",
+        ),
+        // A client without a Telegram chat login.
+        (
+            "nilx-one",
+            ONE_CALLBACK,
+            scope,
+            Some(good_hint.as_str()),
+            "invalid_scope",
+        ),
+        // The scope without a hint, a malformed hint, or a hint without it.
+        ("0x1", TELEGRAM_CALLBACK, scope, None, "invalid_request"),
+        (
+            "0x1",
+            TELEGRAM_CALLBACK,
+            scope,
+            Some("4242"),
+            "invalid_request",
+        ),
+        (
+            "0x1",
+            TELEGRAM_CALLBACK,
+            "openid pub_dress",
+            Some(good_hint.as_str()),
+            "invalid_request",
+        ),
+    ] {
+        let refused = send(
+            &app,
+            get(&binding_authorize_url(client, callback, scope, nonce, hint)),
+        )
+        .await;
+        assert_eq!(
+            refused.status,
+            StatusCode::SEE_OTHER,
+            "{client} {callback}: {}",
+            refused.body
+        );
+        assert_eq!(
+            query(&location(&refused.headers), "error").as_deref(),
+            Some(error),
+            "{client} {callback} {scope} {hint:?}"
+        );
+    }
 }

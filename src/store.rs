@@ -550,6 +550,19 @@ impl Store {
         }
     }
 
+    /// The Telegram account linked to a person, if any.
+    pub(crate) async fn telegram_for_subject(
+        &self,
+        subject: &[u8; 32],
+    ) -> Result<Option<i64>, StoreError> {
+        let row: Option<Option<i64>> =
+            sqlx::query_scalar("SELECT telegram_id FROM telegram_links WHERE subject = ?")
+                .bind(&subject[..])
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.flatten())
+    }
+
     pub(crate) async fn subject_for_telegram(
         &self,
         telegram_id: i64,

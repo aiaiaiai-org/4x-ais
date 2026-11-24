@@ -61,7 +61,8 @@ set of secrets and a service whose every identifier has changed.
       "https://nilx.one/api/v1/auth/aiaiaiai/callback",
       "https://nilx.one/api/v1/telegram/login/callback"
     ],
-    "pub_dress": true
+    "pub_dress": true,
+    "telegram_binding_redirect_uri": "https://nilx.one/api/v1/telegram/login/callback"
   }
 ]
 ```
@@ -69,12 +70,26 @@ set of secrets and a service whose every identifier has changed.
 - **`skin`** is presentation only. `cell` shows the whole prefix `0x0`–`0xf` as
   one choice; `slug` shows the name alone, and AIS assigns the prefix.
 - **`pub_dress`** allows the client to ask for the address in the token.
-- **One client per product.** `0x1` is registered alone; the `nilx-one`
-  client was retired before anyone signed in through it (owner decision,
-  2026-11-22). AIS signs no alias between clients: each pairwise `sub` stands
-  on its own. Registering the Telegram callback opens no product session by
-  itself: the 0x1 host must still verify the provider link and the original
-  sender's confirmation before it acts on it.
+- **`telegram_binding_redirect_uri`** names the client's Telegram chat login,
+  which must be one of its redirect URIs. Only an authorization request on
+  exactly that redirect may ask for the scope `telegram_binding`, and it must
+  send `telegram_binding_hint`. The hint is base64url (unpadded) of
+  `SHA-256("ais-telegram-binding-hint-v1" 0x00 nonce 0x00 decimal-telegram-id)`
+  for the account the client expects, here the sender of `/login`. The ID
+  token then carries `"telegram_binding": true` if and only if the person's
+  linked Telegram account is that account and the PKCE code exchange supplies
+  the same `telegram_binding_hint` in the token request. Otherwise the claim
+  is absent.
+
+  What this guarantees: AIS discloses one bit about an account the client
+  already named, never the linked account or anything derived from it. A
+  request on any other redirect, or a client without the field, gets
+  `invalid_scope`; a missing or malformed hint, or a hint without the scope,
+  gets `invalid_request`. What it does not guarantee: the hint travels in the
+  authorization URL next to the nonce, so anyone who sees that URL can test
+  guesses of the account id against it. For a chat login, the URL goes to that
+  account's own chat. No product key or client credential is involved: the
+  claim rides in the ID token the client already verifies.
 - **`secret_sha256`** is optional. A client that has none is a **public
   client**: it holds no secret and names itself with `client_id` at `/token`.
   What binds its code to it is PKCE (S256, required of every client) and the
