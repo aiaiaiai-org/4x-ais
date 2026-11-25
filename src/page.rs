@@ -192,10 +192,13 @@ pub fn render(view: &View<'_>, status: StatusCode, step: Step<'_>) -> Response {
     let credential_autofill = matches!(&step, Step::SignIn { .. });
     let (heading, form) = match step {
         Step::Identify { prefix, slug } => {
+            // This is only the slug component, not the credential's full
+            // pub_dress. Advertising it as a username confuses Password
+            // AutoFill across the two-step sign-in flow on iOS.
             let field = match view.skin {
                 Skin::Cell => format!(
                     "<div class=\"address-field\">{user_icon}<span class=\"digit-selector\">{select}</span>\
-                     <input id=\"slug\" name=\"slug\" value=\"{slug}\" autocomplete=\"username\" autocapitalize=\"none\" \
+                     <input id=\"slug\" name=\"slug\" value=\"{slug}\" autocomplete=\"off\" autocapitalize=\"none\" \
                      spellcheck=\"false\" required autofocus></div>",
                     select = prefix_select(prefix, &DISCRIMINATORS, view.language),
                     slug = escape(slug),
@@ -327,7 +330,7 @@ fn username_field(
             let field = if sign_in {
                 format!(
                     "<input id=\"username\" name=\"pub_dress\" type=\"text\" value=\"{address}\" \
-                     autocomplete=\"username\" autocapitalize=\"none\" autocorrect=\"off\" \
+                     autocomplete=\"off\" autocapitalize=\"none\" autocorrect=\"off\" \
                      spellcheck=\"false\" required>"
                 )
             } else {

@@ -682,8 +682,13 @@ async fn only_the_cell_sign_in_accepts_a_different_saved_address() {
     };
     let hidden_address = "<input type=\"hidden\" name=\"pub_dress\"";
 
-    // Registration: bound to the server-assigned address, no script at all.
+    // The identify step only has a slug, not a complete credential username.
+    // Password managers should discover the full address on the sign-in step.
     let flow = open(&app, "nilx-one", ONE_CALLBACK, None).await;
+    assert!(flow.page.contains("id=\"slug\" name=\"slug\""));
+    assert!(flow.page.contains("autocomplete=\"off\""));
+    assert!(!flow.page.contains("autocomplete=\"username\""));
+    // Registration: bound to the server-assigned address, no script at all.
     let register = flow
         .post(
             &app,
@@ -706,11 +711,15 @@ async fn only_the_cell_sign_in_accepts_a_different_saved_address() {
         )
         .await;
     assert!(cell.body.contains("autocomplete=\"current-password\""));
+    assert!(cell.body.contains("name=\"pub_dress\" type=\"text\""));
+    assert!(cell.body.contains("autocomplete=\"username\""));
     assert!(!cell.body.contains(hidden_address), "{}", cell.body);
     assert!(csp(&cell).contains("script-src 'self';"));
 
     // `slug` sign-in: the hidden address decides; the username only files it.
     let slug = open(&app, "prism", PRISM_CALLBACK, None).await;
+    assert!(slug.page.contains("autocomplete=\"off\""));
+    assert!(!slug.page.contains("autocomplete=\"username\""));
     let slug = slug
         .post(&app, &[("step", "identify"), ("slug", "analyst")])
         .await;
