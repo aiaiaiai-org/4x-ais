@@ -119,7 +119,7 @@ trap 'rm -f "$next_env"' EXIT HUP INT TERM
   # browser sign-in and the Telegram login. telegram_binding_redirect_uri lets that
   # Telegram login, and nothing else, ask whether the linked account is the
   # one it names, without a product key.
-  printf 'AIS_CLIENTS=%s\n' '[{"client_id":"0x1","name":"0x1","skin":"cell","redirect_uris":["https://nilx.one/api/v1/auth/aiaiaiai/callback","https://nilx.one/api/v1/telegram/login/callback"],"pub_dress":true,"telegram_binding_redirect_uri":"https://nilx.one/api/v1/telegram/login/callback"}]'
+  printf 'AIS_CLIENTS=%s\n' '[{"client_id":"0x1","name":"0x1","skin":"cell","redirect_uris":["https://nilx.one/api/v1/auth/aiaiaiai/callback","https://nilx.one/api/v1/telegram/login/callback"],"pub_dress":true,"telegram_binding_redirect_uri":"https://nilx.one/api/v1/telegram/login/callback"},{"client_id":"prism-hubot","name":"prism-hubot","skin":"slug","redirect_uris":[],"product":{"keys":[{"kid":"k1","x":"7TXKXQhY8WDfOdzusxK-5hQyd6w4QtxBCzyAACzubzY"}],"tokens":{"prism-ai":["tts.synthesize"]},"relay":false}},{"client_id":"prism-ai","name":"prism-ai","skin":"slug","redirect_uris":[],"product":{"keys":[{"kid":"k1","x":"FERNGoEMLfHHyCWpBgPX9vVWxQ9EBoYxqvQmiIyZ6OA"}],"tokens":{},"relay":false}}]'
 } >"$next_env"
 chmod 0600 "$next_env"
 mv "$next_env" "$runtime_env"

@@ -87,8 +87,14 @@ fn the_host_script_writes_an_environment_the_service_accepts() {
     let config = Config::from_lookup(|key| values.get(key).cloned()).expect("the service starts");
     assert_eq!(config.issuer_id(), "https://auth.aiaiaiai.org");
 
-    // 0x1 is the only client: public, on its two exact callbacks.
-    assert_eq!(config.clients.keys().collect::<Vec<_>>(), ["0x1"]);
+    // Three clients: 0x1 (public, on its two exact callbacks) and the two
+    // products that only speak to other products (no redirect URIs).
+    let mut ids = config.clients.keys().cloned().collect::<Vec<_>>();
+    ids.sort();
+    assert_eq!(ids, ["0x1", "prism-ai", "prism-hubot"]);
+    for product in ["prism-ai", "prism-hubot"] {
+        assert!(config.clients[product].redirect_uris.is_empty());
+    }
     let client = &config.clients["0x1"];
     assert_eq!(client.secret_sha256, None);
     assert!(client.pub_dress_scope);
