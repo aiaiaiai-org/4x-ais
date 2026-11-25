@@ -296,8 +296,10 @@ pub fn render(view: &View<'_>, status: StatusCode, step: Step<'_>) -> Response {
         heading,
         &body,
         view.redirect_origin,
-        view.telegram,
-        credential_autofill,
+        Scripts {
+            telegram: view.telegram,
+            credential_autofill,
+        },
     )
 }
 
@@ -335,7 +337,11 @@ fn username_field(
             };
             format!(
                 "{hidden}<label for=\"username\">{name_label}</label><div class=\"address-field\">{icon}{field}</div>",
-                icon = if view.world == World::OneX { ICON_USER } else { "" },
+                icon = if view.world == World::OneX {
+                    ICON_USER
+                } else {
+                    ""
+                },
             )
         }
         Skin::Slug => format!(
@@ -382,8 +388,7 @@ pub fn error_page(language: Language, status: StatusCode, message: Message) -> R
         heading,
         &body,
         "",
-        false,
-        false,
+        Scripts::default(),
     )
 }
 
@@ -419,8 +424,7 @@ pub fn product_entry(language: Language, issuer_host: &str) -> Response {
         heading,
         &body,
         "",
-        false,
-        false,
+        Scripts::default(),
     )
 }
 
@@ -434,8 +438,7 @@ pub fn landing() -> Response {
         "aiaiaiai AIS",
         body,
         "",
-        false,
-        false,
+        Scripts::default(),
     )
 }
 
@@ -503,6 +506,40 @@ pub const TELEGRAM_FORM_SCRIPT: &str = r#"(function () {
 })();
 "#;
 
+/// The scripts a page carries. They also decide its `script-src`, so the
+/// markup and the CSP cannot disagree. Pages without a form carry none.
+#[derive(Clone, Copy, Default)]
+struct Scripts {
+    /// Telegram's Mini App SDK and the script that copies its initData.
+    telegram: bool,
+    /// The same-origin password-manager AutoFill script of the sign-in step.
+    credential_autofill: bool,
+}
+
+impl Scripts {
+    fn tags(self) -> String {
+        format!(
+            "{}{}",
+            if self.telegram { TELEGRAM_SCRIPTS } else { "" },
+            if self.credential_autofill {
+                CREDENTIAL_SCRIPT_TAG
+            } else {
+                ""
+            },
+        )
+    }
+
+    fn policy(self) -> &'static str {
+        if self.telegram {
+            "script-src 'self' https://telegram.org; "
+        } else if self.credential_autofill {
+            "script-src 'self'; "
+        } else {
+            ""
+        }
+    }
+}
+
 fn document(
     language: Language,
     world: World,
@@ -510,23 +547,13 @@ fn document(
     title: &str,
     body: &str,
     redirect_origin: &str,
-    telegram: bool,
-    credential_autofill: bool,
+    scripts: Scripts,
 ) -> Response {
     let lang = if language == Language::Ukrainian {
         "uk"
     } else {
         "en"
     };
-    let scripts = format!(
-        "{}{}",
-        if telegram { TELEGRAM_SCRIPTS } else { "" },
-        if credential_autofill {
-            CREDENTIAL_SCRIPT_TAG
-        } else {
-            ""
-        },
-    );
     let html = format!(
         "<!doctype html><html lang=\"{lang}\"{root_class}><head><meta charset=\"utf-8\">\
          <meta name=\"viewport\" content=\"{viewport}\">\
@@ -558,6 +585,7 @@ fn document(
         } else {
             ""
         },
+        scripts = scripts.tags(),
     );
     let mut response = (status, html).into_response();
     let headers = response.headers_mut();
@@ -569,14 +597,9 @@ fn document(
     // Browsers apply form-action to the redirect after the post, so the
     // client's own origin is an allowed destination.
     // A Telegram chat login also runs Telegram's Mini App SDK and the one
-    // script that copies its initData into the form; no other page has script.
-    let script = if telegram {
-        "script-src 'self' https://telegram.org; "
-    } else if credential_autofill {
-        "script-src 'self'; "
-    } else {
-        ""
-    };
+    // script that copies its initData into the form; the sign-in step runs the
+    // same-origin AutoFill script; no other page has script.
+    let script = scripts.policy();
     let csp = format!(
         "default-src 'none'; {script}style-src 'self'; font-src 'self'; form-action 'self' {redirect_origin}; \
          frame-ancestors 'none'; base-uri 'none'"
