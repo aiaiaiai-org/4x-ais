@@ -172,8 +172,9 @@ legacy Bond migration (`nilx-one/core#116`) is activated: that migration
 stores `(iss, pairwise sub)` against an existing Bond, and a later rename
 would orphan every such binding. Nobody signed in through `nilx-one`, so it
 was retired without a migration (owner decision, 2026-11-22): the registry in
-`deploy/prepare-runtime-env.sh` names only `0x1`, and `nilx-one/core` accepts
-only `0x1`.
+`deploy/prepare-runtime-env.sh` names `0x1` as the only person-facing client
+(`prism-hubot` and `prism-ai` are products with no redirect URIs), and
+`nilx-one/core` accepts only `0x1`.
 
 ## Telegram Special purchase authorization
 

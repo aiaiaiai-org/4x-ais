@@ -87,8 +87,35 @@ fn the_host_script_writes_an_environment_the_service_accepts() {
     let config = Config::from_lookup(|key| values.get(key).cloned()).expect("the service starts");
     assert_eq!(config.issuer_id(), "https://auth.aiaiaiai.org");
 
-    // 0x1 is the only client: public, on its two exact callbacks.
-    assert_eq!(config.clients.keys().collect::<Vec<_>>(), ["0x1"]);
+    // Three clients: 0x1 (public, on its two exact callbacks) and the two
+    // products that only speak to other products (no redirect URIs).
+    let mut ids = config.clients.keys().cloned().collect::<Vec<_>>();
+    ids.sort();
+    assert_eq!(ids, ["0x1", "prism-ai", "prism-hubot"]);
+    // The deployment policy, pinned: least privilege for both products.
+    for id in ["prism-ai", "prism-hubot"] {
+        let client = &config.clients[id];
+        assert!(client.redirect_uris.is_empty(), "{id}");
+        assert_eq!(client.secret_sha256, None, "{id}");
+        assert!(!client.pub_dress_scope, "{id}");
+        assert_eq!(client.telegram_binding_redirect_uri, None, "{id}");
+        let product = client.product.as_ref().expect(id);
+        assert!(!product.relay, "{id}");
+        assert_eq!(product.keys.keys().collect::<Vec<_>>(), ["k1"], "{id}");
+    }
+    let hubot = config.clients["prism-hubot"].product.as_ref().unwrap();
+    let grants = hubot.tokens.iter().collect::<Vec<_>>();
+    assert_eq!(grants.len(), 1);
+    assert_eq!(grants[0].0, "prism-ai");
+    assert_eq!(grants[0].1.iter().collect::<Vec<_>>(), ["tts.synthesize"]);
+    assert!(
+        config.clients["prism-ai"]
+            .product
+            .as_ref()
+            .unwrap()
+            .tokens
+            .is_empty()
+    );
     let client = &config.clients["0x1"];
     assert_eq!(client.secret_sha256, None);
     assert!(client.pub_dress_scope);
