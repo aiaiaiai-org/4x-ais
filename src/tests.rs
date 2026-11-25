@@ -2550,3 +2550,94 @@ async fn the_telegram_binding_is_refused_outside_the_chat_login_context() {
         );
     }
 }
+
+#[tokio::test]
+async fn a_telegram_chat_login_page_hands_its_init_data_to_the_client_only() {
+    let app = app().await;
+    let (_, created) = register_cell(&app, "0", "bound").await;
+    assert_eq!(created.status, StatusCode::SEE_OTHER, "{}", created.body);
+    let nonce = "nonce-telegram-init-data-1";
+    let hint = crate::issuer::telegram_binding_hint(nonce, 42);
+    let page = send(
+        &app,
+        get(&binding_authorize_url(
+            "0x1",
+            TELEGRAM_CALLBACK,
+            "openid pub_dress telegram_binding",
+            nonce,
+            Some(&hint),
+        )),
+    )
+    .await;
+    assert_eq!(page.status, StatusCode::OK, "{}", page.body);
+    assert!(page.body.contains(r#"name="telegram_init_data""#));
+    assert!(
+        page.body
+            .contains("https://telegram.org/js/telegram-web-app.js")
+    );
+    assert!(page.body.contains(r#"src="/static/telegram.js""#));
+    let csp = page.headers["content-security-policy"].to_str().unwrap();
+    assert!(
+        csp.contains("script-src 'self' https://telegram.org"),
+        "{csp}"
+    );
+
+    // A browser sign-in has no script and no such field.
+    let browser = open(&app, "0x1", ONE_CALLBACK, None).await;
+    assert!(!browser.page.contains("telegram_init_data"));
+    assert!(!browser.page.contains("<script"));
+
+    let script = send(&app, get("/static/telegram.js")).await;
+    assert_eq!(script.status, StatusCode::OK);
+    assert!(script.body.contains("Telegram.WebApp"));
+
+    let flow = Flow {
+        client_id: "0x1",
+        callback: TELEGRAM_CALLBACK,
+        nonce: nonce.to_owned(),
+        request: hidden(&page.body, "request"),
+        cookie: set_cookie(&page.headers, "__Host-ais_authz").expect("browser cookie"),
+        page: page.body,
+    };
+    let init_data = "query_id=q&user=%7B%22id%22%3A42%7D&auth_date=1&hash=00";
+    let signed_in = flow
+        .post(
+            &app,
+            &[
+                ("step", "sign_in"),
+                ("pub_dress", "0x0bound"),
+                ("password", PASSWORD),
+                ("telegram_init_data", init_data),
+            ],
+        )
+        .await;
+    let back = location(&signed_in.headers);
+    let response = flow.exchange(&app, &query(&back, "code").unwrap()).await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+    let token: serde_json::Value = serde_json::from_str(&response.body).unwrap();
+    assert_eq!(token["telegram_init_data"], init_data);
+    // Never inside the signed ID token: AIS asserts nothing about it.
+    assert!(!token["id_token"].as_str().unwrap().contains("query_id"));
+    assert!(
+        !token_payload(token["id_token"].as_str().unwrap())
+            .to_string()
+            .contains("query_id")
+    );
+
+    // A browser sign-in that posts the field anyway passes nothing on.
+    let signed_in = browser
+        .post(
+            &app,
+            &[
+                ("step", "sign_in"),
+                ("pub_dress", "0x0bound"),
+                ("password", PASSWORD),
+                ("telegram_init_data", init_data),
+            ],
+        )
+        .await;
+    let back = location(&signed_in.headers);
+    let response = browser.exchange(&app, &query(&back, "code").unwrap()).await;
+    let token: serde_json::Value = serde_json::from_str(&response.body).unwrap();
+    assert!(token.get("telegram_init_data").is_none());
+}

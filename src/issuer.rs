@@ -55,6 +55,7 @@ const CODE_TTL: u64 = 60;
 const ID_TOKEN_TTL: u64 = 5 * 60;
 const HINT_TTL: u64 = 180 * 24 * 60 * 60;
 const MAX_PARAMETER_BYTES: usize = 512;
+const MAX_TELEGRAM_INIT_DATA_BYTES: usize = 4096;
 const MAX_PENDING_CODES: usize = 10_000;
 const STYLESHEET: &str = include_str!("../static/auth.css");
 
@@ -72,6 +73,8 @@ struct PendingCode {
     /// named in `telegram_binding_hint`.
     telegram_binding: bool,
     telegram_binding_hint: Option<String>,
+    /// Telegram's initData from the page, passed through to the client.
+    telegram_init_data: Option<String>,
     auth_time: u64,
     expires_at: u64,
 }
@@ -107,6 +110,7 @@ pub fn router(config: Config, store: Store) -> Router {
         .route("/", get(|| async { page::landing() }))
         .route("/healthz", get(|| async { "ok\n" }))
         .route("/static/auth.css", get(stylesheet))
+        .route("/static/telegram.js", get(telegram_script))
         .route("/.well-known/openid-configuration", get(discovery))
         .route("/.well-known/jwks.json", get(jwks))
         .route("/authorize", get(authorize).post(submit))
@@ -140,6 +144,24 @@ pub(crate) fn now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs())
         .unwrap_or_default()
+}
+
+async fn telegram_script() -> Response {
+    let mut response = page::TELEGRAM_FORM_SCRIPT.into_response();
+    let headers = response.headers_mut();
+    headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("text/javascript; charset=utf-8"),
+    );
+    headers.insert(
+        CACHE_CONTROL,
+        HeaderValue::from_static("public, max-age=300"),
+    );
+    headers.insert(
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
+    );
+    response
 }
 
 async fn stylesheet() -> Response {
@@ -457,6 +479,7 @@ async fn authorize(
         signed: &signed,
         redirect_origin: &origin_of(&request.redirect_uri),
         message: None,
+        telegram: request.telegram_binding_hint.is_some(),
     };
     let (prefix, slug) = hint.as_ref().map_or(('0', ""), |address| {
         (address.discriminator(), address.slug())
@@ -489,6 +512,11 @@ struct SubmitForm {
     password: String,
     #[serde(default)]
     password_confirm: String,
+    /// Telegram's signed initData, copied in by the page of a Telegram chat
+    /// login. AIS cannot verify it (it holds no bot token): it only passes it
+    /// to the client in the code exchange, and the client verifies it.
+    #[serde(default)]
+    telegram_init_data: String,
 }
 
 /// Everything one submitted step needs to answer.
@@ -501,6 +529,8 @@ struct Ctx<'a> {
     redirect_origin: String,
     now: u64,
     source: String,
+    /// The initData of a Telegram chat login's final step, if any.
+    telegram_init_data: Option<String>,
 }
 
 impl Ctx<'_> {
@@ -515,6 +545,7 @@ impl Ctx<'_> {
             signed: self.signed,
             redirect_origin: &self.redirect_origin,
             message,
+            telegram: self.request.telegram_binding_hint.is_some(),
         };
         page::render(&view, status, step)
     }
@@ -631,8 +662,15 @@ async fn submit(
     let Some(client) = state.config.clients.get(&request.client_id).cloned() else {
         return page::error_page(language, StatusCode::BAD_REQUEST, Message::UnknownClient);
     };
+    // Only a Telegram chat login carries initData, and only a plausible one:
+    // the client rejects anything Telegram did not sign.
+    let telegram_init_data = Some(form.telegram_init_data.clone()).filter(|data| {
+        request.telegram_binding_hint.is_some()
+            && (1..=MAX_TELEGRAM_INIT_DATA_BYTES).contains(&data.len())
+    });
     let ctx = Ctx {
         state: &state,
+        telegram_init_data,
         redirect_origin: origin_of(&request.redirect_uri),
         request,
         client,
@@ -1005,6 +1043,7 @@ async fn complete(ctx: &Ctx<'_>, identity: &Identity) -> Response {
                 pub_dress: request.pub_dress_scope.then(|| identity.pub_dress.clone()),
                 telegram_binding,
                 telegram_binding_hint: request.telegram_binding_hint.clone(),
+                telegram_init_data: ctx.telegram_init_data.clone(),
                 auth_time: ctx.now,
                 expires_at: ctx.now + CODE_TTL,
             },
@@ -1136,15 +1175,19 @@ async fn token(
     let Some(access_token) = random_token(32) else {
         return token_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable");
     };
-    no_store(
-        StatusCode::OK,
-        serde_json::json!({
-            "access_token": access_token,
-            "token_type": "Bearer",
-            "expires_in": ID_TOKEN_TTL,
-            "id_token": id_token,
-        }),
-    )
+    let mut body = serde_json::json!({
+        "access_token": access_token,
+        "token_type": "Bearer",
+        "expires_in": ID_TOKEN_TTL,
+        "id_token": id_token,
+    });
+    // The Telegram chat login's own evidence, returned only to the client
+    // that proved the code with its PKCE verifier. The client verifies it
+    // with its bot token; AIS asserts nothing about it.
+    if let Some(init_data) = pending.telegram_init_data {
+        body["telegram_init_data"] = serde_json::Value::String(init_data);
+    }
+    no_store(StatusCode::OK, body)
 }
 
 fn invalid_client() -> Response {
