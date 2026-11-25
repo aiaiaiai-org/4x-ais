@@ -90,6 +90,16 @@ set of secrets and a service whose every identifier has changed.
   guesses of the account id against it. For a chat login, the URL goes to that
   account's own chat. No product key or client credential is involved: the
   claim rides in the ID token the client already verifies.
+- **Telegram chat login page.** A request on `telegram_binding_redirect_uri`
+  renders the page with Telegram's Mini App SDK and `/static/telegram.js`. No
+  other page has script. When the page runs inside Telegram, the script copies
+  `Telegram.WebApp.initData` into a hidden `telegram_init_data` field (at most
+  4 KiB). AIS holds no bot token and cannot verify it. It only returns the
+  value as `telegram_init_data` in the token response, never inside the ID
+  token, and only to the client that redeems the code with its PKCE verifier.
+  The client verifies it with its own bot token: it is the client's proof of
+  which Telegram account signed in, used when AIS has no Telegram link yet.
+  Outside Telegram the field stays empty and nothing is returned.
 - **`secret_sha256`** is optional. A client that has none is a **public
   client**: it holds no secret and names itself with `client_id` at `/token`.
   What binds its code to it is PKCE (S256, required of every client) and the

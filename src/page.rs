@@ -148,6 +148,9 @@ pub struct View<'a> {
     pub signed: &'a str,
     pub redirect_origin: &'a str,
     pub message: Option<Message>,
+    /// A Telegram chat login: the page runs inside Telegram and hands its
+    /// signed `initData` to the client through the code exchange.
+    pub telegram: bool,
 }
 
 pub fn render(view: &View<'_>, status: StatusCode, step: Step<'_>) -> Response {
@@ -163,8 +166,13 @@ pub fn render(view: &View<'_>, status: StatusCode, step: Step<'_>) -> Response {
         })
         .unwrap_or_default();
     let request = format!(
-        "<input type=\"hidden\" name=\"request\" value=\"{}\">",
-        escape(view.signed)
+        "<input type=\"hidden\" name=\"request\" value=\"{}\">{}",
+        escape(view.signed),
+        if view.telegram {
+            "<input type=\"hidden\" name=\"telegram_init_data\" value=\"\">"
+        } else {
+            ""
+        }
     );
     let one = view.world == World::OneX;
     let sign_in_heading = if one {
@@ -287,6 +295,7 @@ pub fn render(view: &View<'_>, status: StatusCode, step: Step<'_>) -> Response {
         heading,
         &body,
         view.redirect_origin,
+        view.telegram,
     )
 }
 
@@ -345,7 +354,15 @@ pub fn error_page(language: Language, status: StatusCode, message: Message) -> R
         "<p class=\"surface-kicker\">aiaiaiai AIS</p><h1>{heading}</h1><p class=\"identity-error\" role=\"alert\">{}</p>",
         message.text(language)
     );
-    document(language, World::Ecosystem, status, heading, &body, "")
+    document(
+        language,
+        World::Ecosystem,
+        status,
+        heading,
+        &body,
+        "",
+        false,
+    )
 }
 
 /// Visible 0x1 entry for direct browser visits without an OIDC transaction.
@@ -373,7 +390,15 @@ pub fn product_entry(language: Language, issuer_host: &str) -> Response {
            <p><a class="text-action world-primary" href="https://nilx.one/api/v1/auth/aiaiaiai/start?return=%2F">{ICON_ENTER}{action}</a></p>
            <p class="identity-status">{note}</p>{origin}"#
     );
-    document(language, World::OneX, StatusCode::OK, heading, &body, "")
+    document(
+        language,
+        World::OneX,
+        StatusCode::OK,
+        heading,
+        &body,
+        "",
+        false,
+    )
 }
 
 pub fn landing() -> Response {
@@ -386,6 +411,7 @@ pub fn landing() -> Response {
         "aiaiaiai AIS",
         body,
         "",
+        false,
     )
 }
 
@@ -433,6 +459,21 @@ const ICON_ENTER: &str = "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\">\
 const ICON_LINK: &str = "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\">\
     <path d=\"M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1 1M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 0 0 6 6l1-1\"/></svg>";
 
+const TELEGRAM_SCRIPTS: &str = "<script src=\"https://telegram.org/js/telegram-web-app.js\"></script>\
+    <script src=\"/static/telegram.js\"></script>";
+
+/// Copies Telegram's signed initData into every form of a Telegram chat login.
+/// Outside Telegram it does nothing and the field stays empty.
+pub const TELEGRAM_FORM_SCRIPT: &str = r#"(function () {
+  var app = window.Telegram && window.Telegram.WebApp;
+  if (!app || !app.initData) { return; }
+  app.ready();
+  app.expand();
+  var fields = document.querySelectorAll('input[name="telegram_init_data"]');
+  for (var i = 0; i < fields.length; i += 1) { fields[i].value = app.initData; }
+})();
+"#;
+
 fn document(
     language: Language,
     world: World,
@@ -440,6 +481,7 @@ fn document(
     title: &str,
     body: &str,
     redirect_origin: &str,
+    telegram: bool,
 ) -> Response {
     let lang = if language == Language::Ukrainian {
         "uk"
@@ -451,7 +493,7 @@ fn document(
          <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
          <meta name=\"referrer\" content=\"no-referrer\"><title>{title} · aiaiaiai AIS</title>\
          <link rel=\"stylesheet\" href=\"/static/auth.css\"></head>\
-         <body{class}>{scene}<main class=\"ecosystem-auth-panel\">{body}</main></body></html>",
+         <body{class}>{scene}<main class=\"ecosystem-auth-panel\">{body}</main>{scripts}</body></html>",
         class = if world == World::OneX {
             " class=\"world-0x1\""
         } else {
@@ -462,6 +504,7 @@ fn document(
         } else {
             ""
         },
+        scripts = if telegram { TELEGRAM_SCRIPTS } else { "" },
     );
     let mut response = (status, html).into_response();
     let headers = response.headers_mut();
@@ -472,8 +515,15 @@ fn document(
     secure_headers(headers);
     // Browsers apply form-action to the redirect after the post, so the
     // client's own origin is an allowed destination.
+    // A Telegram chat login also runs Telegram's Mini App SDK and the one
+    // script that copies its initData into the form; no other page has script.
+    let script = if telegram {
+        "script-src 'self' https://telegram.org; "
+    } else {
+        ""
+    };
     let csp = format!(
-        "default-src 'none'; style-src 'self'; font-src 'self'; form-action 'self' {redirect_origin}; \
+        "default-src 'none'; {script}style-src 'self'; font-src 'self'; form-action 'self' {redirect_origin}; \
          frame-ancestors 'none'; base-uri 'none'"
     );
     if let Ok(value) = HeaderValue::from_str(csp.trim()) {
