@@ -250,6 +250,13 @@ body {
   animation-duration: 1ms;
 }
 
+/* Match the river's lowest purple stop behind the iOS keyboard/safe area.
+   This is the webview background, not the system keyboard itself. */
+html.world-0x1-root {
+  background: #3d4778;
+  color-scheme: dark;
+}
+
 /*
  * 0x1 world: an evening river city behind a glass panel. Presentation only;
  * the markup, fields and flow are the same as every other product's. The
@@ -257,6 +264,13 @@ body {
  * system one. Gold is the action, sky blue the glow.
  */
 body.world-0x1 {
+  min-height: 100dvh;
+  /* viewport-fit=cover reaches under the notch on every edge. */
+  padding:
+    max(16px, env(safe-area-inset-top))
+    max(16px, env(safe-area-inset-right))
+    max(16px, env(safe-area-inset-bottom))
+    max(16px, env(safe-area-inset-left));
   --w-sky-top: #6f7fc4;
   --w-sky-mid: #c9a3c8;
   --w-sky-low: #f6c58f;

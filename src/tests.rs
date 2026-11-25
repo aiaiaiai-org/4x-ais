@@ -561,6 +561,35 @@ async fn a_cell_registration_reaches_the_0x1_client_as_a_verified_sign_in() {
         "{}",
         page.body
     );
+    assert!(
+        page.body
+            .contains("id=\"username\" name=\"pub_dress\" type=\"text\""),
+        "the cell sign-in address must be a real editable username"
+    );
+    assert!(page.body.contains("src=\"/static/credential-autofill.js\""));
+    assert!(
+        page.body
+            .contains("<html lang=\"en\" class=\"world-0x1-root\"")
+    );
+    assert!(
+        page.body
+            .contains("name=\"theme-color\" content=\"#3d4778\"")
+    );
+    assert!(page.body.contains("viewport-fit=cover"));
+    let csp = page
+        .headers
+        .get("content-security-policy")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(csp.contains("script-src 'self';"));
+    let script = send(&app, get("/static/credential-autofill.js")).await;
+    assert_eq!(script.status, StatusCode::OK);
+    assert_eq!(
+        script.headers.get(header::CONTENT_TYPE).unwrap(),
+        "text/javascript; charset=utf-8"
+    );
+    assert!(script.body.contains("form.requestSubmit(button)"));
     let signed_in = again
         .post(
             &app,
@@ -634,6 +663,71 @@ async fn the_slug_page_never_shows_the_prefix_and_ais_assigns_it() {
         verified.pub_dress, None,
         "Prism does not ask for the address"
     );
+}
+
+/// Only the `cell` sign-in lets a password manager choose another saved
+/// address; registration stays bound to the assigned one, the `slug` skin
+/// keeps its hidden address, and only sign-in pages run any script.
+#[tokio::test]
+async fn only_the_cell_sign_in_accepts_a_different_saved_address() {
+    let app = app().await;
+    let csp = |reply: &Reply| {
+        reply
+            .headers
+            .get("content-security-policy")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned()
+    };
+    let hidden_address = "<input type=\"hidden\" name=\"pub_dress\"";
+
+    // Registration: bound to the server-assigned address, no script at all.
+    let flow = open(&app, "nilx-one", ONE_CALLBACK, None).await;
+    let register = flow
+        .post(
+            &app,
+            &[("step", "identify"), ("prefix", "0"), ("slug", "analyst")],
+        )
+        .await;
+    assert!(register.body.contains("autocomplete=\"new-password\""));
+    assert!(register.body.contains(hidden_address), "{}", register.body);
+    assert!(register.body.contains("autocomplete=\"username\" readonly"));
+    assert!(!register.body.contains("<script"), "{}", register.body);
+    assert!(!csp(&register).contains("script-src"), "{}", csp(&register));
+    register_cell(&app, "0", "analyst").await;
+
+    // `cell` sign-in: the address itself is the editable username.
+    let cell = open(&app, "nilx-one", ONE_CALLBACK, None).await;
+    let cell = cell
+        .post(
+            &app,
+            &[("step", "identify"), ("prefix", "0"), ("slug", "analyst")],
+        )
+        .await;
+    assert!(cell.body.contains("autocomplete=\"current-password\""));
+    assert!(!cell.body.contains(hidden_address), "{}", cell.body);
+    assert!(csp(&cell).contains("script-src 'self';"));
+
+    // `slug` sign-in: the hidden address decides; the username only files it.
+    let slug = open(&app, "prism", PRISM_CALLBACK, None).await;
+    let slug = slug
+        .post(&app, &[("step", "identify"), ("slug", "analyst")])
+        .await;
+    assert!(slug.body.contains("autocomplete=\"current-password\""));
+    assert_eq!(hidden(&slug.body, "pub_dress"), "0x0analyst");
+    assert!(
+        !slug.body.contains("autocomplete=\"username\" readonly"),
+        "{}",
+        slug.body
+    );
+    assert!(slug.body.contains("src=\"/static/credential-autofill.js\""));
+    assert!(!slug.body.contains("world-0x1-root"), "{}", slug.body);
+
+    // Pages without a form stay script-free.
+    let landing = send(&app, get("/")).await;
+    assert!(!landing.body.contains("<script"));
+    assert!(!csp(&landing).contains("script-src"));
 }
 
 #[tokio::test]

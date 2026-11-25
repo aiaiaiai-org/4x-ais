@@ -110,6 +110,7 @@ pub fn router(config: Config, store: Store) -> Router {
         .route("/", get(|| async { page::landing() }))
         .route("/healthz", get(|| async { "ok\n" }))
         .route("/static/auth.css", get(stylesheet))
+        .route("/static/credential-autofill.js", get(credential_autofill))
         .route("/static/telegram.js", get(telegram_script))
         .route("/.well-known/openid-configuration", get(discovery))
         .route("/.well-known/jwks.json", get(jwks))
@@ -157,6 +158,23 @@ async fn telegram_script() -> Response {
         CACHE_CONTROL,
         HeaderValue::from_static("public, max-age=300"),
     );
+    headers.insert(
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
+    );
+    response
+}
+
+// A fixed same-origin script for password-manager AutoFill; never interpolates
+// or reads a user's password on the server.
+async fn credential_autofill() -> Response {
+    let mut response = page::CREDENTIAL_AUTOFILL_SCRIPT.into_response();
+    let headers = response.headers_mut();
+    headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("text/javascript; charset=utf-8"),
+    );
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
     headers.insert(
         "x-content-type-options",
         HeaderValue::from_static("nosniff"),
