@@ -561,6 +561,23 @@ async fn a_cell_registration_reaches_the_0x1_client_as_a_verified_sign_in() {
         "{}",
         page.body
     );
+    assert!(
+        page.body.contains("id=\"username\" name=\"pub_dress\" type=\"text\""),
+        "the cell sign-in address must be a real editable username"
+    );
+    assert!(page.body.contains("src=\"/static/credential-autofill.js\""));
+    assert!(page.body.contains("<html lang=\"en\" class=\"world-0x1-root\""));
+    assert!(page.body.contains("name=\"theme-color\" content=\"#3d4778\""));
+    assert!(page.body.contains("viewport-fit=cover"));
+    let csp = page.headers.get("content-security-policy").unwrap().to_str().unwrap();
+    assert!(csp.contains("script-src 'self';"));
+    let script = send(&app, get("/static/credential-autofill.js")).await;
+    assert_eq!(script.status, StatusCode::OK);
+    assert_eq!(
+        script.headers.get(header::CONTENT_TYPE).unwrap(),
+        "text/javascript; charset=utf-8"
+    );
+    assert!(script.body.contains("form.requestSubmit(button)"));
     let signed_in = again
         .post(
             &app,

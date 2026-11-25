@@ -189,6 +189,7 @@ pub fn render(view: &View<'_>, status: StatusCode, step: Step<'_>) -> Response {
         Skin::Cell => "pub_dress",
         Skin::Slug => t("Name", "Ім'я"),
     };
+    let credential_autofill = matches!(&step, Step::SignIn { .. });
     let (heading, form) = match step {
         Step::Identify { prefix, slug } => {
             let field = match view.skin {
@@ -235,7 +236,7 @@ pub fn render(view: &View<'_>, status: StatusCode, step: Step<'_>) -> Response {
                  <div class=\"password-field\">{lock_icon}<input id=\"password\" name=\"password\" type=\"password\" \
                  autocomplete=\"current-password\" required autofocus></div>\
                  <button type=\"submit\">{enter_icon}{submit}</button>",
-                username = username_field(view, pub_dress, slug, name_label),
+                username = username_field(view, pub_dress, slug, name_label, true),
                 password = t("Password", "Пароль"),
                 submit = t("Sign in", "Увійти"),
             ),
@@ -259,7 +260,7 @@ pub fn render(view: &View<'_>, status: StatusCode, step: Step<'_>) -> Response {
                  <p class=\"password-note\">{note}</p><button type=\"submit\">{enter_icon}{submit}</button>",
                 assignment = escape(assignment),
                 free = t("This name is free.", "Це ім'я вільне."),
-                username = username_field(view, pub_dress, slug, name_label),
+                username = username_field(view, pub_dress, slug, name_label, false),
                 password = t("Password", "Пароль"),
                 confirm = t("Repeat the password", "Повторіть пароль"),
                 note = t(
@@ -296,34 +297,54 @@ pub fn render(view: &View<'_>, status: StatusCode, step: Step<'_>) -> Response {
         &body,
         view.redirect_origin,
         view.telegram,
+        credential_autofill,
     )
 }
 
 /// The account name a password manager files the password under. It is the
 /// full address in every skin, so one saved entry serves every product; the
 /// `slug` skin keeps it out of sight.
-fn username_field(view: &View<'_>, pub_dress: &str, slug: &str, name_label: &str) -> String {
-    let hidden = format!(
-        "<input type=\"hidden\" name=\"pub_dress\" value=\"{}\">",
-        escape(pub_dress)
-    );
+fn username_field(
+    view: &View<'_>,
+    pub_dress: &str,
+    slug: &str,
+    name_label: &str,
+    sign_in: bool,
+) -> String {
+    let address = escape(pub_dress);
+    // Registration remains bound to the server-assigned address. At sign-in,
+    // the cell skin can accept a different saved username; the issuer still
+    // validates its full pub_dress and password, including rate limits.
+    let hidden = if sign_in && matches!(view.skin, Skin::Cell) {
+        String::new()
+    } else {
+        format!("<input type=\"hidden\" name=\"pub_dress\" value=\"{address}\">")
+    };
     match view.skin {
-        Skin::Cell => format!(
-            "{hidden}<label for=\"username\">{name_label}</label><div class=\"address-field\">{icon}\
-             <input id=\"username\" value=\"{}\" autocomplete=\"username\" readonly></div>",
-            escape(pub_dress),
-            icon = if view.world == World::OneX {
-                ICON_USER
+        Skin::Cell => {
+            let field = if sign_in {
+                format!(
+                    "<input id=\"username\" name=\"pub_dress\" type=\"text\" value=\"{address}\" \
+                     autocomplete=\"username\" autocapitalize=\"none\" autocorrect=\"off\" \
+                     spellcheck=\"false\" required>"
+                )
             } else {
-                ""
-            },
-        ),
+                format!(
+                    "<input id=\"username\" value=\"{address}\" autocomplete=\"username\" readonly>"
+                )
+            };
+            format!(
+                "{hidden}<label for=\"username\">{name_label}</label><div class=\"address-field\">{icon}{field}</div>",
+                icon = if view.world == World::OneX { ICON_USER } else { "" },
+            )
+        }
         Skin::Slug => format!(
             "{hidden}<p class=\"identity-status\">{} <strong>{}</strong></p>\
-             <input class=\"visually-hidden\" tabindex=\"-1\" aria-hidden=\"true\" value=\"{}\" autocomplete=\"username\" readonly>",
+             <input id=\"username\" class=\"visually-hidden\" tabindex=\"-1\" aria-hidden=\"true\" \
+             value=\"{address}\" autocomplete=\"username\" {}>",
             escape(name_label),
             escape(slug),
-            escape(pub_dress)
+            if sign_in { "" } else { "readonly" }
         ),
     }
 }
@@ -362,6 +383,7 @@ pub fn error_page(language: Language, status: StatusCode, message: Message) -> R
         &body,
         "",
         false,
+        false,
     )
 }
 
@@ -398,6 +420,7 @@ pub fn product_entry(language: Language, issuer_host: &str) -> Response {
         &body,
         "",
         false,
+        false,
     )
 }
 
@@ -411,6 +434,7 @@ pub fn landing() -> Response {
         "aiaiaiai AIS",
         body,
         "",
+        false,
         false,
     )
 }
@@ -459,6 +483,11 @@ const ICON_ENTER: &str = "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\">\
 const ICON_LINK: &str = "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\">\
     <path d=\"M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1 1M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 0 0 6 6l1-1\"/></svg>";
 
+const CREDENTIAL_SCRIPT_TAG: &str =
+    "<script src=\"/static/credential-autofill.js\" defer></script>";
+
+pub const CREDENTIAL_AUTOFILL_SCRIPT: &str = include_str!("../static/credential-autofill.js");
+
 const TELEGRAM_SCRIPTS: &str = "<script src=\"https://telegram.org/js/telegram-web-app.js\"></script>\
     <script src=\"/static/telegram.js\"></script>";
 
@@ -482,18 +511,43 @@ fn document(
     body: &str,
     redirect_origin: &str,
     telegram: bool,
+    credential_autofill: bool,
 ) -> Response {
     let lang = if language == Language::Ukrainian {
         "uk"
     } else {
         "en"
     };
+    let scripts = format!(
+        "{}{}",
+        if telegram { TELEGRAM_SCRIPTS } else { "" },
+        if credential_autofill {
+            CREDENTIAL_SCRIPT_TAG
+        } else {
+            ""
+        },
+    );
     let html = format!(
-        "<!doctype html><html lang=\"{lang}\"><head><meta charset=\"utf-8\">\
-         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
-         <meta name=\"referrer\" content=\"no-referrer\"><title>{title} · aiaiaiai AIS</title>\
+        "<!doctype html><html lang=\"{lang}\"{root_class}><head><meta charset=\"utf-8\">\
+         <meta name=\"viewport\" content=\"{viewport}\">\
+         <meta name=\"referrer\" content=\"no-referrer\">{theme}<title>{title} · aiaiaiai AIS</title>\
          <link rel=\"stylesheet\" href=\"/static/auth.css\"></head>\
          <body{class}>{scene}<main class=\"ecosystem-auth-panel\">{body}</main>{scripts}</body></html>",
+        root_class = if world == World::OneX {
+            " class=\"world-0x1-root\""
+        } else {
+            ""
+        },
+        viewport = if world == World::OneX {
+            "width=device-width, initial-scale=1, viewport-fit=cover"
+        } else {
+            "width=device-width, initial-scale=1"
+        },
+        theme = if world == World::OneX {
+            "<meta name=\"theme-color\" content=\"#3d4778\">"
+        } else {
+            ""
+        },
         class = if world == World::OneX {
             " class=\"world-0x1\""
         } else {
@@ -504,7 +558,6 @@ fn document(
         } else {
             ""
         },
-        scripts = if telegram { TELEGRAM_SCRIPTS } else { "" },
     );
     let mut response = (status, html).into_response();
     let headers = response.headers_mut();
@@ -519,6 +572,8 @@ fn document(
     // script that copies its initData into the form; no other page has script.
     let script = if telegram {
         "script-src 'self' https://telegram.org; "
+    } else if credential_autofill {
+        "script-src 'self'; "
     } else {
         ""
     };

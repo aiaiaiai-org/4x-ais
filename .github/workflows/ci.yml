@@ -49,6 +49,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Test password-manager autofill behavior
+        run: node --test scripts/test-credential-autofill.cjs
+
       # rust-toolchain.toml pins the compiler with clippy and rustfmt.
       - name: Format
         run: cargo fmt --all -- --check

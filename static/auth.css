@@ -256,7 +256,16 @@ body {
  * scene is always dusk, so it sets its own scheme instead of following the
  * system one. Gold is the action, sky blue the glow.
  */
+/* Match the river's lowest purple stop behind the iOS keyboard/safe area.
+   This is the webview background, not the system keyboard itself. */
+html.world-0x1-root {
+  background: #3d4778;
+  color-scheme: dark;
+}
+
 body.world-0x1 {
+  min-height: 100dvh;
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
   --w-sky-top: #6f7fc4;
   --w-sky-mid: #c9a3c8;
   --w-sky-low: #f6c58f;
