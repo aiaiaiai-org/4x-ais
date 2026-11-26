@@ -50,10 +50,6 @@ test "$(code -H "$host" "$base/authorize?client_id=unknown")" = 400
 challenge="$(printf %s 'a-pkce-verifier-that-is-long-enough-for-rfc-7636' | openssl dgst -sha256 -binary | base64 | tr '+/' '-_' | tr -d '=')"
 page="$(curl -fsS -H "$host" "$base/authorize?response_type=code&client_id=smoke&redirect_uri=https%3A%2F%2Fsmoke.example%2Fcb&scope=openid&state=s&nonce=n&code_challenge=$challenge&code_challenge_method=S256")"
 printf %s "$page" | grep -q '>0xf</option>'
-# The first step is a slug, never the saved full-address username.
-printf %s "$page" | grep -q 'autocomplete="off"'
-if printf %s "$page" | grep -q 'autocomplete="username"'; then
-  echo "smoke: identify step mislabels a slug as the credential username" >&2
-  exit 1
-fi
+printf %s "$page" | grep -q 'autocomplete="username"'
+printf %s "$page" | grep -q 'autocomplete="current-password"'
 echo "smoke: ok"

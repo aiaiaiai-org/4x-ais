@@ -9,7 +9,7 @@ const vm = require('node:vm');
 
 const source = readFileSync(join(__dirname, '../static/credential-autofill.js'), 'utf8');
 
-function harness({ fixed = false, error = false, valid = true } = {}) {
+function harness({ fixed = false, error = false, valid = true, cell = false } = {}) {
   const frames = [];
   const submissions = [];
   let isAutofilled = false;
@@ -25,15 +25,28 @@ function harness({ fixed = false, error = false, valid = true } = {}) {
       },
     };
   };
-  const username = element('0x0sky');
+  const username = element(cell ? '' : '0x0sky');
+  const prefix = element('0');
+  prefix.options = Array.from('0123456789abcdef', value => ({ value, text: '0x' + value }));
+  prefix.getAttribute = () => 'Prefix';
+  username.matches = () => false;
+  username.focus = () => {};
+  let choices;
+  username.closest = () => ({ after(node) { choices = node; } });
+  const step = element(cell ? 'identify' : 'sign_in');
+  const entry = cell ? {} : null;
   const password = element();
   password.matches = (query) => query === ':-webkit-autofill' && isAutofilled;
   const button = element();
+  button.lastChild = { textContent: 'Continue' };
+  button.dataset = { loginLabel: 'Sign in' };
   const address = fixed ? element('0x0sky') : null;
   const form = element();
   form.querySelector = (query) => {
     const fields = {
-      'input[name="step"]': element('sign_in'),
+      'input[name="step"]': step,
+      '[data-saved-login]': entry,
+      'select[name="prefix"]': cell ? prefix : null,
       'input[autocomplete="username"]': username,
       'input[autocomplete="current-password"]': password,
       'button[type="submit"]': button,
@@ -42,8 +55,17 @@ function harness({ fixed = false, error = false, valid = true } = {}) {
     return fields[query] || null;
   };
   form.checkValidity = () => valid;
-  form.requestSubmit = (target) => submissions.push(target);
+  form.requestSubmit = (target) => {
+    form.dispatch('submit');
+    submissions.push(target);
+  };
   const document = {
+    createElement() {
+      return Object.assign(element(), {
+        children: [], setAttribute() {}, remove() { choices = null; },
+        append(child) { this.children.push(child); },
+      });
+    },
     querySelector(query) {
       if (query === 'form.identity-form') return form;
       if (query === '.identity-error') return error ? {} : null;
@@ -52,7 +74,12 @@ function harness({ fixed = false, error = false, valid = true } = {}) {
   };
   vm.runInNewContext(source, { document, requestAnimationFrame: fn => frames.push(fn) });
   return {
-    form, username, password, button, submissions,
+    form, username, password, button, submissions, prefix, step,
+    get choices() { return choices; },
+    fillAddress(value) {
+      username.value = value;
+      username.dispatch('input', { inputType: 'insertReplacementText' });
+    },
     interact() { form.dispatch('pointerdown'); },
     type(value) {
       password.value = value;
@@ -134,4 +161,47 @@ test('autofill animation can trigger submission without an input event', () => {
   page.animateAutofill();
   page.flush();
   assert.equal(page.submissions.length, 1);
+});
+
+test('cell login splits a saved address and submits the matching pair once', () => {
+  for (const passwordFirst of [false, true]) {
+    const page = harness({ cell: true });
+    page.interact();
+    if (passwordFirst) {
+      page.username.value = 'previous';
+      page.autofill('saved password');
+      page.flush();
+      assert.equal(page.submissions.length, 0);
+    }
+    page.fillAddress('0x0sky');
+    assert.equal(page.prefix.value, '0');
+    assert.equal(page.username.value, 'sky');
+    if (!passwordFirst) page.autofill('saved password');
+    page.flush();
+    assert.deepEqual(page.submissions, [page.button]);
+    assert.equal(page.step.value, 'sign_in');
+    assert.equal(page.username.name, 'pub_dress');
+    assert.equal(page.username.value, '0x0sky');
+    assert.equal(page.password.value, 'saved password');
+  }
+});
+
+test('an invalid or missing saved prefix waits for an explicit cell choice', () => {
+  for (const saved of ['0xgsky', 'sky']) {
+    const page = harness({ cell: true });
+    page.interact();
+    page.fillAddress(saved);
+    page.autofill('saved password');
+    page.flush();
+    assert.equal(page.username.value, 'sky');
+    assert.equal(page.prefix.value, '');
+    assert.equal(page.submissions.length, 0);
+    assert.deepEqual(page.choices.children.map(choice => choice.textContent),
+      Array.from('0123456789abcdef', digit => '0x' + digit));
+    page.choices.children[15].dispatch('click');
+    page.flush();
+    assert.equal(page.username.value, '0xfsky');
+    assert.equal(page.password.value, 'saved password');
+    assert.deepEqual(page.submissions, [page.button]);
+  }
 });

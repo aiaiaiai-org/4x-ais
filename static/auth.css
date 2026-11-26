@@ -603,3 +603,21 @@ body.world-0x1 .ecosystem-auth-panel .world-origin svg {
     animation: none;
   }
 }
+
+.ecosystem-auth-panel fieldset[data-saved-login] {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.ecosystem-auth-panel fieldset[data-saved-login]:not([hidden]) {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.ecosystem-auth-panel .prefix-choices {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.25rem;
+}
