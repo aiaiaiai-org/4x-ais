@@ -13,6 +13,7 @@ function harness({ fixed = false, error = false, valid = true, cell = false } = 
   const frames = [];
   const submissions = [];
   let isAutofilled = false;
+  let usernameAutofilled = false;
   const element = (value = '') => {
     const listeners = {};
     return {
@@ -29,7 +30,7 @@ function harness({ fixed = false, error = false, valid = true, cell = false } = 
   const prefix = element('0');
   prefix.options = Array.from('0123456789abcdef', value => ({ value, text: '0x' + value }));
   prefix.getAttribute = () => 'Prefix';
-  username.matches = () => false;
+  username.matches = (query) => query === ':-webkit-autofill' && usernameAutofilled;
   username.focus = () => {};
   let choices;
   username.closest = () => ({ after(node) { choices = node; } });
@@ -80,6 +81,7 @@ function harness({ fixed = false, error = false, valid = true, cell = false } = 
       username.value = value;
       username.dispatch('input', { inputType: 'insertReplacementText' });
     },
+    markUsernameAutofilled(value = true) { usernameAutofilled = value; },
     interact() { form.dispatch('pointerdown'); },
     type(value) {
       password.value = value;
@@ -204,4 +206,106 @@ test('an invalid or missing saved prefix waits for an explicit cell choice', () 
     assert.equal(page.password.value, 'saved password');
     assert.deepEqual(page.submissions, [page.button]);
   }
+});
+
+test('each clipboard paste parses once, even if it equals the previously displayed body', () => {
+  const page = harness({ cell: true });
+  page.interact();
+  function paste(value) {
+    page.username.value = value;
+    page.username.dispatch('input', { inputType: 'insertFromPaste' });
+    page.username.dispatch('change');
+    page.flush();
+  }
+
+  paste('0x1da');
+  assert.equal(page.prefix.value, '1');
+  assert.equal(page.username.value, 'da');
+  paste('0x10x0sky');
+  assert.equal(page.prefix.value, '1');
+  assert.equal(page.username.value, '0x0sky');
+  paste('0x0sky');
+  assert.equal(page.prefix.value, '0');
+  assert.equal(page.username.value, 'sky');
+  paste('sky');
+  assert.equal(page.prefix.value, '0');
+  assert.equal(page.username.value, 'sky');
+  assert.equal(page.choices.children.length, 16);
+  assert.equal(page.submissions.length, 0);
+  page.choices.children[1].dispatch('click');
+  page.autofill('saved password');
+  page.flush();
+  assert.equal(page.username.value, '0x1sky');
+  assert.deepEqual(page.submissions, [page.button]);
+});
+
+test('a nested split is not parsed again by later autofill signals', () => {
+  const page = harness({ cell: true });
+  page.interact();
+  page.fillAddress('0x10x0sky');
+  assert.equal(page.prefix.value, '1');
+  assert.equal(page.username.value, '0x0sky');
+  page.markUsernameAutofilled();
+  page.username.dispatch('change');
+  page.autofill('saved password');
+  page.flush();
+  assert.deepEqual(page.submissions, [page.button]);
+  assert.equal(page.username.value, '0x10x0sky');
+});
+
+test('a dropped address parses again, even if it equals the previously displayed body', () => {
+  const page = harness({ cell: true });
+  page.interact();
+  page.username.value = '0x10x0sky';
+  page.username.dispatch('input', { inputType: 'insertFromPaste' });
+  assert.equal(page.username.value, '0x0sky');
+  page.username.value = '0x0sky';
+  page.username.dispatch('input', { inputType: 'insertFromDrop' });
+  assert.equal(page.prefix.value, '0');
+  assert.equal(page.username.value, 'sky');
+});
+
+test('a pasted bare body replaces the body, keeps the chosen cell and reopens the choices', () => {
+  for (const cell of ['0', 'd']) {
+    const page = harness({ cell: true });
+    page.interact();
+    page.username.value = '0x' + cell + 'sky';
+    page.username.dispatch('input', { inputType: 'insertFromPaste' });
+    assert.equal(page.prefix.value, cell);
+    assert.equal(page.username.value, 'sky');
+    assert.ok(!page.choices);
+    for (const body of ['sky', 'other']) {
+      page.username.value = body;
+      page.username.dispatch('input', { inputType: 'insertFromPaste' });
+      page.flush();
+      assert.equal(page.prefix.value, cell);
+      assert.equal(page.username.value, body);
+      assert.equal(page.choices.children.length, 16);
+    }
+    page.prefix.dispatch('change');
+    assert.ok(!page.choices);
+    page.autofill('saved password');
+    page.flush();
+    assert.equal(page.username.value, '0x' + cell + 'other');
+    assert.deepEqual(page.submissions, [page.button]);
+  }
+});
+
+test('typed bodies stay manual and a later bare paste keeps the chosen cell', () => {
+  const page = harness({ cell: true });
+  page.interact();
+  page.prefix.value = 'd';
+  page.username.value = 'sky';
+  page.username.dispatch('input', { inputType: 'insertText' });
+  assert.ok(!page.choices);
+  page.username.value = 'sky';
+  page.username.dispatch('input', { inputType: 'insertFromPaste' });
+  assert.equal(page.prefix.value, 'd');
+  assert.equal(page.username.value, 'sky');
+  assert.equal(page.choices.children.length, 16);
+  page.username.value = '0x1new';
+  page.username.dispatch('input', { inputType: 'insertFromPaste' });
+  assert.equal(page.prefix.value, '1');
+  assert.equal(page.username.value, 'new');
+  assert.ok(!page.choices);
 });

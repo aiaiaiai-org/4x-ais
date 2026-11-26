@@ -44,8 +44,9 @@
     choices = null;
   }
 
-  function openChoices() {
-    prefix.value = '';
+  // keepPrefix: a pasted bare body reopens the choices but keeps the chosen cell.
+  function openChoices(keepPrefix = false) {
+    if (!keepPrefix) prefix.value = '';
     if (choices) return;
     choices = document.createElement('div');
     choices.className = 'prefix-choices';
@@ -66,7 +67,7 @@
     username.closest('.address-field').after(choices);
   }
 
-  function splitAddress(saved = false) {
+  function splitAddress(saved = false, pasted = false) {
     if (!prefix || lastBody === username.value) return;
     const match = /^0x(.?)(.*)$/isu.exec(username.value);
     if (!match && !saved) return;
@@ -78,7 +79,7 @@
       prefix.value = digit;
       closeChoices();
     } else {
-      openChoices();
+      openChoices(pasted && !match);
     }
   }
 
@@ -100,8 +101,11 @@
         lastBody = undefined;
         return;
       }
+      // A new paste or drop can equal the body left by a previous split.
+      const pasted = event.inputType === 'insertFromPaste' || event.inputType === 'insertFromDrop';
+      if (pasted) lastBody = undefined;
       splitAddress(event.inputType === 'insertFromPaste' || event.inputType === 'insertReplacementText' ||
-        event.inputType === 'insertFromAutoFill' || username.matches(':-webkit-autofill'));
+        event.inputType === 'insertFromAutoFill' || username.matches(':-webkit-autofill'), pasted);
     });
     username.addEventListener('change', () => {
       if (username.matches(':-webkit-autofill')) splitAddress(true);
