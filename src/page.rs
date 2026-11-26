@@ -189,28 +189,40 @@ pub fn render(view: &View<'_>, status: StatusCode, step: Step<'_>) -> Response {
         Skin::Cell => "pub_dress",
         Skin::Slug => t("Name", "Ім'я"),
     };
-    let credential_autofill = matches!(&step, Step::SignIn { .. });
+    let cell_entry = matches!(&step, Step::Identify { .. }) && view.skin == Skin::Cell;
+    let credential_autofill = cell_entry || matches!(&step, Step::SignIn { .. });
     let (heading, form) = match step {
         Step::Identify { prefix, slug } => {
             let field = match view.skin {
                 Skin::Cell => format!(
                     "<div class=\"address-field\">{user_icon}<span class=\"digit-selector\">{select}</span>\
                      <input id=\"slug\" name=\"slug\" value=\"{slug}\" autocomplete=\"username\" autocapitalize=\"none\" \
-                     spellcheck=\"false\" required autofocus></div>",
+                     spellcheck=\"false\" required></div>",
                     select = prefix_select(prefix, &DISCRIMINATORS, view.language),
                     slug = escape(slug),
                 ),
                 Skin::Slug => format!(
-                    "<div class=\"address-field\">{user_icon}<input id=\"slug\" name=\"slug\" value=\"{}\" autocomplete=\"username\" \
+                    "<div class=\"address-field\">{user_icon}<input id=\"slug\" name=\"slug\" value=\"{}\" autocomplete=\"off\" \
                      autocapitalize=\"none\" spellcheck=\"false\" required autofocus></div>",
                     escape(slug)
                 ),
             };
+            let saved_password = if cell_entry {
+                format!(
+                    "<fieldset hidden disabled data-saved-login><label for=\"password\">{}</label>\
+                     <div class=\"password-field\">{lock_icon}<input id=\"password\" name=\"password\" type=\"password\" \
+                     autocomplete=\"current-password\"></div></fieldset>",
+                    t("Password", "Пароль")
+                )
+            } else {
+                String::new()
+            };
             (
                 sign_in_heading,
                 format!(
-                    "<input type=\"hidden\" name=\"step\" value=\"identify\"><label for=\"slug\">{name_label}</label>{field}\
-                     <button type=\"submit\">{enter_icon}{}</button>",
+                    "<input type=\"hidden\" name=\"step\" value=\"identify\"><label for=\"slug\">{name_label}</label>{field}{saved_password}\
+                     <button type=\"submit\" data-login-label=\"{}\">{enter_icon}{}</button>",
+                    t("Sign in", "Увійти"),
                     t("Continue", "Далі")
                 ),
             )
@@ -234,7 +246,7 @@ pub fn render(view: &View<'_>, status: StatusCode, step: Step<'_>) -> Response {
                 "<input type=\"hidden\" name=\"step\" value=\"sign_in\">{username}\
                  <label for=\"password\">{password}</label>\
                  <div class=\"password-field\">{lock_icon}<input id=\"password\" name=\"password\" type=\"password\" \
-                 autocomplete=\"current-password\" required autofocus></div>\
+                 autocomplete=\"current-password\" required></div>\
                  <button type=\"submit\">{enter_icon}{submit}</button>",
                 username = username_field(view, pub_dress, slug, name_label, true),
                 password = t("Password", "Пароль"),
@@ -335,8 +347,16 @@ fn username_field(
                     "<input id=\"username\" value=\"{address}\" autocomplete=\"username\" readonly>"
                 )
             };
+            let prefix = if sign_in {
+                format!(
+                    "<span hidden data-sign-in-prefix>{}</span>",
+                    prefix_select('0', &DISCRIMINATORS, view.language)
+                )
+            } else {
+                String::new()
+            };
             format!(
-                "{hidden}<label for=\"username\">{name_label}</label><div class=\"address-field\">{icon}{field}</div>",
+                "{hidden}<label for=\"username\">{name_label}</label><div class=\"address-field\">{icon}{prefix}{field}</div>",
                 icon = if view.world == World::OneX {
                     ICON_USER
                 } else {

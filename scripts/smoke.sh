@@ -51,4 +51,5 @@ challenge="$(printf %s 'a-pkce-verifier-that-is-long-enough-for-rfc-7636' | open
 page="$(curl -fsS -H "$host" "$base/authorize?response_type=code&client_id=smoke&redirect_uri=https%3A%2F%2Fsmoke.example%2Fcb&scope=openid&state=s&nonce=n&code_challenge=$challenge&code_challenge_method=S256")"
 printf %s "$page" | grep -q '>0xf</option>'
 printf %s "$page" | grep -q 'autocomplete="username"'
+printf %s "$page" | grep -q 'autocomplete="current-password"'
 echo "smoke: ok"

@@ -449,9 +449,8 @@ async fn direct_0x1_entry_is_visible_but_never_starts_authentication() {
     assert!(set_cookie(&ukrainian.headers, "__Host-ais_authz").is_none());
 }
 
-/// The 0x1 world is presentation for the 0x1 clients only. It adds no
-/// script, no style attribute and no field: other products keep the neutral
-/// page, and the CSP stays as strict as before.
+/// Only 0x1 clients get the world skin. Cell entry loads the credential
+/// helper while the public landing page stays script-free.
 #[tokio::test]
 async fn only_the_0x1_clients_open_in_the_0x1_world() {
     let app = app().await;
@@ -468,7 +467,7 @@ async fn only_the_0x1_clients_open_in_the_0x1_world() {
             "{}",
             flow.page
         );
-        assert!(!flow.page.contains("<script"));
+        assert!(flow.page.contains("/static/credential-autofill.js"));
         assert!(!flow.page.contains(" style="));
     }
     for (client_id, callback) in [("prism", PRISM_CALLBACK), ("open-app", OPEN_CALLBACK)] {
@@ -682,8 +681,12 @@ async fn only_the_cell_sign_in_accepts_a_different_saved_address() {
     };
     let hidden_address = "<input type=\"hidden\" name=\"pub_dress\"";
 
-    // Registration: bound to the server-assigned address, no script at all.
+    // Cell entry supports a saved username/password pair on the first page.
     let flow = open(&app, "nilx-one", ONE_CALLBACK, None).await;
+    assert!(flow.page.contains("id=\"slug\" name=\"slug\""));
+    assert!(flow.page.contains("autocomplete=\"current-password\""));
+    assert!(flow.page.contains("autocomplete=\"username\""));
+    // Registration: bound to the server-assigned address, no script at all.
     let register = flow
         .post(
             &app,
@@ -706,11 +709,15 @@ async fn only_the_cell_sign_in_accepts_a_different_saved_address() {
         )
         .await;
     assert!(cell.body.contains("autocomplete=\"current-password\""));
+    assert!(cell.body.contains("name=\"pub_dress\" type=\"text\""));
+    assert!(cell.body.contains("autocomplete=\"username\""));
     assert!(!cell.body.contains(hidden_address), "{}", cell.body);
     assert!(csp(&cell).contains("script-src 'self';"));
 
     // `slug` sign-in: the hidden address decides; the username only files it.
     let slug = open(&app, "prism", PRISM_CALLBACK, None).await;
+    assert!(slug.page.contains("autocomplete=\"off\""));
+    assert!(!slug.page.contains("autocomplete=\"username\""));
     let slug = slug
         .post(&app, &[("step", "identify"), ("slug", "analyst")])
         .await;
@@ -2676,10 +2683,10 @@ async fn a_telegram_chat_login_page_hands_its_init_data_to_the_client_only() {
         "{csp}"
     );
 
-    // A browser sign-in has no script and no such field.
+    // A browser sign-in does not load Telegram or collect initData.
     let browser = open(&app, "0x1", ONE_CALLBACK, None).await;
     assert!(!browser.page.contains("telegram_init_data"));
-    assert!(!browser.page.contains("<script"));
+    assert!(!browser.page.contains("/static/telegram.js"));
 
     let script = send(&app, get("/static/telegram.js")).await;
     assert_eq!(script.status, StatusCode::OK);
