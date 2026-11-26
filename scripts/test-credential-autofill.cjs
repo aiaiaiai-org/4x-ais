@@ -205,3 +205,34 @@ test('an invalid or missing saved prefix waits for an explicit cell choice', () 
     assert.deepEqual(page.submissions, [page.button]);
   }
 });
+
+test('each clipboard paste parses once, even if it equals the previously displayed body', () => {
+  const page = harness({ cell: true });
+  page.interact();
+  function paste(value) {
+    page.username.value = value;
+    page.username.dispatch('input', { inputType: 'insertFromPaste' });
+    page.username.dispatch('change');
+    page.flush();
+  }
+
+  paste('0x1da');
+  assert.equal(page.prefix.value, '1');
+  assert.equal(page.username.value, 'da');
+  paste('0x10x0sky');
+  assert.equal(page.prefix.value, '1');
+  assert.equal(page.username.value, '0x0sky');
+  paste('0x0sky');
+  assert.equal(page.prefix.value, '0');
+  assert.equal(page.username.value, 'sky');
+  paste('sky');
+  assert.equal(page.prefix.value, '');
+  assert.equal(page.username.value, 'sky');
+  assert.equal(page.choices.children.length, 16);
+  assert.equal(page.submissions.length, 0);
+  page.choices.children[1].dispatch('click');
+  page.autofill('saved password');
+  page.flush();
+  assert.equal(page.username.value, '0x1sky');
+  assert.deepEqual(page.submissions, [page.button]);
+});

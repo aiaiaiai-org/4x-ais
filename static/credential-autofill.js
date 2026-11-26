@@ -100,6 +100,8 @@
         lastBody = undefined;
         return;
       }
+      // A new paste can equal the body left by a previous split.
+      if (event.inputType === 'insertFromPaste') lastBody = undefined;
       splitAddress(event.inputType === 'insertFromPaste' || event.inputType === 'insertReplacementText' ||
         event.inputType === 'insertFromAutoFill' || username.matches(':-webkit-autofill'));
     });
