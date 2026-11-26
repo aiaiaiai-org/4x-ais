@@ -192,16 +192,17 @@ pub fn render(view: &View<'_>, status: StatusCode, step: Step<'_>) -> Response {
     let credential_autofill = matches!(&step, Step::SignIn { .. });
     let (heading, form) = match step {
         Step::Identify { prefix, slug } => {
+            // Only the complete pub_dress identifies a saved credential.
             let field = match view.skin {
                 Skin::Cell => format!(
                     "<div class=\"address-field\">{user_icon}<span class=\"digit-selector\">{select}</span>\
-                     <input id=\"slug\" name=\"slug\" value=\"{slug}\" autocomplete=\"username\" autocapitalize=\"none\" \
+                     <input id=\"slug\" name=\"slug\" value=\"{slug}\" autocomplete=\"off\" autocapitalize=\"none\" \
                      spellcheck=\"false\" required autofocus></div>",
                     select = prefix_select(prefix, &DISCRIMINATORS, view.language),
                     slug = escape(slug),
                 ),
                 Skin::Slug => format!(
-                    "<div class=\"address-field\">{user_icon}<input id=\"slug\" name=\"slug\" value=\"{}\" autocomplete=\"username\" \
+                    "<div class=\"address-field\">{user_icon}<input id=\"slug\" name=\"slug\" value=\"{}\" autocomplete=\"off\" \
                      autocapitalize=\"none\" spellcheck=\"false\" required autofocus></div>",
                     escape(slug)
                 ),
@@ -234,7 +235,7 @@ pub fn render(view: &View<'_>, status: StatusCode, step: Step<'_>) -> Response {
                 "<input type=\"hidden\" name=\"step\" value=\"sign_in\">{username}\
                  <label for=\"password\">{password}</label>\
                  <div class=\"password-field\">{lock_icon}<input id=\"password\" name=\"password\" type=\"password\" \
-                 autocomplete=\"current-password\" required autofocus></div>\
+                 autocomplete=\"current-password\" required></div>\
                  <button type=\"submit\">{enter_icon}{submit}</button>",
                 username = username_field(view, pub_dress, slug, name_label, true),
                 password = t("Password", "Пароль"),
