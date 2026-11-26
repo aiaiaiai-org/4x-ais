@@ -3,8 +3,8 @@
 
 # aiaiaiai AIS: the auth identity service
 
-Status: first identity runtime implemented (sign-in, registration, both skins, OIDC issuer); not deployed.
-Host: `auth.aiaiaiai.org` (edge-prod-2; activation pending).
+Status: identity runtime implemented (sign-in, registration, both skins, OIDC issuer); deployed on Railway.
+Host: `auth.aiaiaiai.org` (Railway).
 Parent: [ECO-0001](https://github.com/aiaiaiai-org/.github/blob/main/ecosystem/identity/DESIGN.md),
 and `nilx-one/web` `docs/unified-auth.md` and `docs/identity-boundary.md`.
 
@@ -36,16 +36,12 @@ Facts as of 2026-11-09. This repository now holds the identity runtime (`src/`, 
   `aiaiaiai_accounts` table (migration 0042).
 - `client_pairwise_subject`: the per-client digest of the private subject.
 
-**`aiaiaiai-org/infra`**: `auth.aiaiaiai.org` resolves to edge-prod-2, the
-same address as `aiaiaiai.org` (DNS only). The route is on infra `master`
-([infra#90](https://github.com/aiaiaiai-org/infra/pull/90) and
-[infra#94](https://github.com/aiaiaiai-org/infra/pull/94)): workload `4x-ais`
-on `aiaiaiai-edge`, port 1927, health `/healthz`. The edge skips the workload
-while its container is absent. The workload has no automatic delivery yet: it
-is added in its own infra change once this repository has published an
-attested image and `aiaiaiai-org/infra` can read the package, because a tag
-the planner cannot read or verify aborts delivery of every other workload on
-the edge. Not deployed.
+**Deployment (updated 2026-11-26)**: Railway builds `4x-ais` directly from
+this repository's `master` branch, serves `auth.aiaiaiai.org` on port 1927,
+and checks `/healthz`. It supplies runtime variables and mounts `/data` for
+persistence. The former VPS deployment and ingress are obsolete; AIS is an
+external issuer for infra-managed consumers. The GHCR publishing workflow is
+separate from Railway deployment.
 
 **`nilx-one/web` docs**: `unified-auth.md` (contract), `identity-boundary.md`
 (the split: identity keeps people, 0x1 keeps the game, the seeds wallet moves

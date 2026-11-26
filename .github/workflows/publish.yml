@@ -1,8 +1,8 @@
 # © 2026 aiaiaiai · aiaiaiai.org
 # SPDX-License-Identifier: Apache-2.0
 # Publishes the service image for the current master head and attests it.
-# aiaiaiai-org/infra delivers that attested digest on its own
-# (infra docs/automatic-delivery.md). This repository holds no infra credential.
+# Publishes an independently attested GHCR artifact; this workflow does not deploy.
+# Railway builds and deploys the service from this repository's master branch.
 name: Publish image
 on:
   push:
@@ -33,11 +33,10 @@ jobs:
             echo "::error::Publish runs only for refs/heads/master (got $GITHUB_REF)."
             exit 1
           fi
-          # Attestations are for public repositories unless the plan offers
-          # them. A private push would leave a SHA tag, and infra aborts every
-          # delivery on the edge when that tag has no provenance.
+          # This workflow requires public-repository build provenance and
+          # refuses to publish an image when that requirement cannot be met.
           if [[ "$VISIBILITY" != "public" ]]; then
-            echo "::error::Refusing to publish while 4x-ais is private. Make the repository public, then re-run this workflow. See infra docs/automatic-delivery.md."
+            echo "::error::Refusing to publish while 4x-ais is private. This workflow requires a public repository for its provenance policy."
             exit 1
           fi
       - name: Authenticate to GHCR
@@ -82,7 +81,7 @@ jobs:
             sleep 2
           done
           if [[ -z "$id" ]]; then
-            echo "::error::ghcr.io/aiaiaiai-org/4x-ais:$tag was pushed without provenance and could not be deleted. Delete that tag before infra plans deliveries."
+            echo "::error::ghcr.io/aiaiaiai-org/4x-ais:$tag was pushed without provenance and could not be deleted. Remove the unattested tag before it is used."
             exit 1
           fi
           gh api --method DELETE "/orgs/aiaiaiai-org/packages/container/4x-ais/versions/$id"

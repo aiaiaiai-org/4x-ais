@@ -24,7 +24,8 @@ bash scripts/smoke.sh
 
 `.github/workflows/publish.yml` publishes `ghcr.io/aiaiaiai-org/4x-ais:<commit>`
 from public `master` and attests it. While the repository is private it stops
-before the push. `auth.aiaiaiai.org` routes to the `4x-ais` workload on
-edge-prod-2 (`aiaiaiai-org/infra`); it is not deployed.
+before the push. This workflow publishes an artifact; Railway builds and
+deploys `master` directly, serving `auth.aiaiaiai.org` independently of
+`aiaiaiai-org/infra`.
 
 Licensed under Apache-2.0 (`LICENSE`, `NOTICE`).
