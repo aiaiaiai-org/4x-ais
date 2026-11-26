@@ -309,7 +309,8 @@ host-owned secrets are in `docs/runtime.md`. The service is Rust (`src/`).
 - Branches are `feat/*`, `fix/*`, and `docs/*`. Do not use `claude/*` names.
 - `.github/workflows/publish.yml` publishes the service image from public
   `master` only. While this repository is private the workflow stops before
-  the push. An unattested tag would stop infra delivery for the whole edge.
+  the push. It publishes an artifact, not a deployment. Railway builds and
+  deploys `master` directly; infra does not own AIS deployment.
 - The gates are `cargo fmt --all -- --check`, `cargo clippy --locked
   --all-targets -- -D warnings`, `cargo test --locked` and
   `bash scripts/smoke.sh`.
