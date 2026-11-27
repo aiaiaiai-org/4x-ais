@@ -309,3 +309,41 @@ test('typed bodies stay manual and a later bare paste keeps the chosen cell', ()
   assert.equal(page.username.value, 'new');
   assert.ok(!page.choices);
 });
+
+test('a username filled as insertText splits at once, not only at submit', () => {
+  const page = harness({ cell: true });
+  page.interact();
+  page.prefix.value = 'f';
+  page.username.value = 'rSb';
+  page.username.dispatch('input', { inputType: 'insertText' });
+  // WebKit fills the saved address as plain text and marks it autofilled.
+  page.markUsernameAutofilled();
+  page.username.value = '0xfrSb';
+  page.username.dispatch('input', { inputType: 'insertText' });
+  assert.equal(page.prefix.value, 'f');
+  assert.equal(page.username.value, 'rSb');
+  assert.equal(page.submissions.length, 0);
+});
+
+test('the autofill animation on the username splits a silently filled address', () => {
+  const page = harness({ cell: true });
+  page.interact();
+  page.username.value = '0xfrSb';
+  page.username.dispatch('animationstart', { animationName: 'credential-autofill-start' });
+  assert.equal(page.prefix.value, 'f');
+  assert.equal(page.username.value, 'rSb');
+  page.autofill('saved password');
+  page.flush();
+  assert.deepEqual(page.submissions, [page.button]);
+  assert.equal(page.username.value, '0xfrSb');
+});
+
+test('typed text is never split, even when it starts like an address', () => {
+  const page = harness({ cell: true });
+  page.interact();
+  page.prefix.value = '1';
+  page.username.value = '0x0sky';
+  page.username.dispatch('input', { inputType: 'insertText' });
+  assert.equal(page.prefix.value, '1');
+  assert.equal(page.username.value, '0x0sky');
+});
