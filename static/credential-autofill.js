@@ -99,6 +99,9 @@
       if (event.inputType === 'insertText' || event.inputType?.startsWith('delete')) {
         addressConfirmed = true;
         lastBody = undefined;
+        // A filled username can arrive as `insertText`; the pseudo-class
+        // tells it apart from typing.
+        if (username.matches(':-webkit-autofill')) splitAddress(true);
         return;
       }
       // A new paste or drop can equal the body left by a previous split.
@@ -110,7 +113,15 @@
     username.addEventListener('change', () => {
       if (username.matches(':-webkit-autofill')) splitAddress(true);
     });
+    // WebKit can fill a saved username as plain `insertText`, or without an
+    // input event at all. Its :-webkit-autofill animation (auth.css) is the
+    // reliable signal, so the body splits as soon as the manager fills it,
+    // not only when the form submits.
+    username.addEventListener('animationstart', (event) => {
+      if (event.animationName === 'credential-autofill-start') splitAddress(true);
+    });
     form.addEventListener('submit', () => {
+      if (username.matches(':-webkit-autofill')) splitAddress(true);
       if (!password.value) {
         if (entry) username.name = 'slug';
         return;
@@ -154,14 +165,20 @@
   form.addEventListener('keydown', () => { interacted = true; });
   form.addEventListener('submit', () => { submitting = true; });
 
+  function splitFilledAddress() {
+    if (prefix && username.matches(':-webkit-autofill')) splitAddress(true);
+  }
+
   password.addEventListener('animationstart', (event) => {
     updateButton();
+    splitFilledAddress();
     if (event.animationName !== 'credential-autofill-start' || !interacted) return;
     passwordAutofilled = true;
     maybeSubmit();
   });
   password.addEventListener('input', (event) => {
     updateButton();
+    splitFilledAddress();
     if (event.inputType === 'insertText' || event.inputType?.startsWith('delete')) {
       passwordAutofilled = false;
       return;
